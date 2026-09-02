@@ -4,6 +4,10 @@ Local 3D printing cost calculator. It uploads `*.gcode.3mf` files exported by
 Bambu Studio or OrcaSlicer, reads material, weight (model, supports, prime
 tower and total) and multi-color information, and calculates print costs.
 
+> This project is a hobby project and is currently in Early Access. It is still
+> under active development, so errors, missing features, or incomplete
+> functionality may occur. Feedback and suggestions are welcome.
+
 ## Features
 
 - Drag-and-drop upload of `.gcode.3mf` files on desktop and mobile
@@ -72,6 +76,50 @@ npm run start:production
 
 The scripts check for Node.js 22 or newer and install dependencies. For normal
 development, use `npm run dev` afterwards.
+
+## Docker
+
+The app can also be run as a container, without installing Node.js locally.
+
+```bash
+docker compose up --build -d
+```
+
+Open [http://localhost:3000](http://localhost:3000). The SQLite database,
+`db-config.json` and the encryption key persist across restarts in the local
+`./data` folder, which is mounted as a volume.
+
+Stop the container:
+
+```bash
+docker compose down
+```
+
+To use a different port, set `PORT` before starting (or in a `.env` file next
+to `docker-compose.yml`):
+
+```powershell
+$env:PORT=8080; docker compose up --build -d
+```
+
+To connect to Postgres or MySQL/MariaDB instead of SQLite, set `DB_DRIVER` and
+`DATABASE_URL` the same way (see [Database backends](#database-backends)
+below), or configure the connection later from the app's Settings page.
+
+Without Compose, plain Docker also works:
+
+```bash
+docker build -t 3d-pcc .
+docker run -d -p 3000:3000 -v ./data:/app/data --name 3d-pcc 3d-pcc
+```
+
+On Linux hosts, the container runs as a non-root user (uid 1001); if `./data`
+already exists and is owned by root (e.g. created via `sudo docker compose
+up`), grant it write access first:
+
+```bash
+sudo chown -R 1001:1001 ./data
+```
 
 ### Changing the port
 

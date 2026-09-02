@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: 3d-pcc:latest
+    container_name: 3d-pcc
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      # Default DB is local SQLite (file in the ./data volume below).
+      # To use Postgres/MySQL instead, set DB_DRIVER + DATABASE_URL here,
+      # or configure the connection later from the /settings page in the app.
+      - DB_DRIVER=${DB_DRIVER:-sqlite}
+      - DATABASE_URL=${DATABASE_URL:-}
+    volumes:
+      # Persists the SQLite DB, db-config.json and the encryption key across restarts.
+      - ./data:/app/data

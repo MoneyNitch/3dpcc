@@ -1,0 +1,15 @@
+.git
+.gitignore
+node_modules
+.next
+out
+build
+coverage
+data
+*.log
+.env
+.env.*
+!.env.example
+*.3mf
+*.gcode.3mf
+README.md

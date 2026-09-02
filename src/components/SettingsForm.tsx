@@ -53,7 +53,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
       ...s,
       materials: [
         ...s.materials,
-        { id: randomUUID(), name: "Neues Material", type: "PLA", color: "#FFFFFF", pricePerKg: 20 },
+        { id: randomUUID(), name: t("settings.newMaterial"), type: "PLA", color: "#FFFFFF", pricePerKg: 20 },
       ],
     }));
     setSaved(false);
@@ -79,7 +79,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
       ...s,
       accessoryMaterials: [
         ...s.accessoryMaterials,
-        { id: randomUUID(), name: "Neue Schraube", pricePerPack: 1, unitsPerPack: 1 },
+        { id: randomUUID(), name: t("settings.newAccessory"), pricePerPack: 1, unitsPerPack: 1 },
       ],
     }));
     setSaved(false);
@@ -110,7 +110,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
         ...s.printers,
         {
           id,
-          name: "Neuer Drucker",
+          name: t("settings.newPrinter"),
           powerConsumptionW: 150,
           purchasePrice: 500,
           lifetimeHours: 8000,

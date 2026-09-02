@@ -1,37 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useLocale } from "@/lib/locale";
+import type { Theme } from "@/lib/types";
 
-type Theme = "light" | "dark";
-
-function applyTheme(theme: Theme) {
-  document.documentElement.classList.toggle("dark", theme === "dark");
-  localStorage.setItem("theme", theme);
-}
-
-export function ThemeToggle() {
+export function ThemeToggle({ initialTheme }: { initialTheme: Theme }) {
   const { t } = useLocale();
-  const [theme, setTheme] = useState<Theme | null>(null);
+  const [theme, setTheme] = useState<Theme>(initialTheme);
 
-  useEffect(() => {
-    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
-  }, []);
-
-  if (theme === null) {
-    // Avoid a hydration mismatch flash before we know the current theme.
-    return <span className="h-9 w-9" />;
+  function toggle() {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    document.documentElement.classList.toggle("dark", next === "dark");
+    document.cookie = `theme=${next}; path=/; max-age=31536000; samesite=lax`;
+    setTheme(next);
   }
+
+  const label = theme === "dark" ? t("theme.toLight") : t("theme.toDark");
 
   return (
     <button
-      onClick={() => {
-        const next: Theme = theme === "dark" ? "light" : "dark";
-        applyTheme(next);
-        setTheme(next);
-      }}
-      aria-label={theme === "dark" ? t("theme.toLight") : t("theme.toDark")}
-      title={theme === "dark" ? t("theme.toLight") : t("theme.toDark")}
+      type="button"
+      onClick={toggle}
+      aria-label={label}
+      title={label}
       className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-lg hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
     >
       {theme === "dark" ? "☀️" : "🌙"}

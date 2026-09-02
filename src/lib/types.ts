@@ -126,6 +126,8 @@ export interface InvoiceTemplate {
   header: string;
   footer: string;
   blocks: InvoiceBlock[];
+  /** User defined variables, e.g. companyName -> "Muster GmbH". */
+  customValues?: Record<string, string>;
 }
 
 export interface AppSettings {
@@ -142,6 +144,7 @@ export interface AppSettings {
 
 export type Language = "de" | "en";
 export type Currency = "EUR" | "USD";
+export type Theme = "light" | "dark";
 
 export interface GeneralSettings {
   language: Language;

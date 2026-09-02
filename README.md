@@ -133,33 +133,3 @@ The database can also be configured in **Settings > Database** without a
 server restart. The connection is tested before saving. The password is
 encrypted in `data/db-config.json`, with the key stored in `data/.dbkey`; both
 files are local and excluded from Git.
-
-## GitHub and releases
-
-GitHub stores the source code and release tags; it does not run this Next.js
-server. Do not commit `.env.local`, `data/`, `.next/`, `node_modules/` or any
-`.3mf` files. The included test 3MF has been removed from the local history.
-
-To publish the project:
-
-```bash
-git add .
-git commit -m "Prepare production release"
-git branch -M main
-git remote add origin https://github.com/YOUR-NAME/YOUR-REPOSITORY.git
-git push -u origin main
-```
-
-For a new release, create and push a version tag:
-
-```bash
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin main --follow-tags
-```
-
-Then open **Releases > Draft a new release** on GitHub, select the tag and add
-the release notes. A deployment platform should use `npm run build` as its
-build command and `npm run start` as its start command. Use the platform's
-`PORT` value at runtime; never commit production secrets or local database
-files.
-

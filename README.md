@@ -45,10 +45,17 @@ npm run build
 npm run start
 ```
 
+For a background live environment, use:
+
+```bash
+npm run build
+npm run start:background
+```
+
 Or use the single command:
 
 ```bash
-npm run start:production
+npm run start:production:background
 ```
 
 On first startup, `data/3d-pcc.db` and the local database configuration are
@@ -63,6 +70,7 @@ Windows PowerShell:
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\install.ps1
+.\scripts\install.ps1 -Background
 npm run start:production
 ```
 
@@ -71,11 +79,14 @@ Linux, macOS or Raspberry Pi:
 ```bash
 chmod +x scripts/install.sh
 ./scripts/install.sh
+./scripts/install.sh --background
 npm run start:production
 ```
 
-The scripts check for Node.js 22 or newer and install dependencies. For normal
-development, use `npm run dev` afterwards.
+The scripts check for Node.js 22 or newer and install dependencies. Use the
+`-Background` or `--background` option if you want the app to keep running in
+the background after the terminal is closed. For normal development, use
+`npm run dev` afterwards.
 
 ## Docker
 

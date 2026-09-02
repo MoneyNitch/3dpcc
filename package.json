@@ -11,7 +11,9 @@
     "build": "next build",
     "build:webpack": "next build --webpack",
     "start": "node scripts/with-env.js start",
+    "start:background": "node scripts/start-background.js",
     "start:production": "npm run build && npm run start",
+    "start:production:background": "npm run build && npm run start:background",
     "lint": "eslint"
   },
   "dependencies": {

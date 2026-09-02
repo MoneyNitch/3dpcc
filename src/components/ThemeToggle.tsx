@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale } from "@/lib/locale";
 
 type Theme = "light" | "dark";
 
@@ -10,6 +11,7 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeToggle() {
+  const { t } = useLocale();
   const [theme, setTheme] = useState<Theme | null>(null);
 
   useEffect(() => {
@@ -28,8 +30,8 @@ export function ThemeToggle() {
         applyTheme(next);
         setTheme(next);
       }}
-      aria-label={theme === "dark" ? "Zu hellem Modus wechseln" : "Zu dunklem Modus wechseln"}
-      title={theme === "dark" ? "Heller Modus" : "Dunkler Modus"}
+      aria-label={theme === "dark" ? t("theme.toLight") : t("theme.toDark")}
+      title={theme === "dark" ? t("theme.toLight") : t("theme.toDark")}
       className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-lg hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
     >
       {theme === "dark" ? "☀️" : "🌙"}

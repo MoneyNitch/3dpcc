@@ -55,6 +55,7 @@ export interface ParsedPlate {
 export interface ParsedPrint {
   id: string;
   fileName: string;
+  displayName?: string;
   createdAt: string;
   plate: ParsedPlate;
 }
@@ -65,6 +66,14 @@ export interface Material {
   type: string; // e.g. PLA, PETG, ABS
   color: string; // hex
   pricePerKg: number;
+}
+
+/** Purchased accessory such as screws, nuts, magnets, or glue. */
+export interface AccessoryMaterial {
+  id: string;
+  name: string;
+  pricePerPack: number;
+  unitsPerPack: number;
 }
 
 export interface PrinterProfile {
@@ -86,11 +95,57 @@ export interface CostSettings {
   wearAndTearPerHour: number;
 }
 
+export type InvoiceBlockType = "text" | "variables" | "lineItems" | "totals" | "spacer";
+
+export type InvoiceCostLine =
+  | "material"
+  | "extraMaterials"
+  | "energy"
+  | "machine"
+  | "labor"
+  | "packaging"
+  | "margin"
+  | "tax";
+
+export interface InvoiceBlock {
+  id: string;
+  type: InvoiceBlockType;
+  content?: string;
+  lineLabels?: Partial<Record<InvoiceCostLine, string>>;
+  hiddenLines?: InvoiceCostLine[];
+  distributeMargin?: boolean;
+  marginTargets?: InvoiceCostLine[];
+  /** Source line to target lines for amounts that should be shown as allocated costs. */
+  distributionTargets?: Partial<Record<InvoiceCostLine, InvoiceCostLine[]>>;
+}
+
+export interface InvoiceTemplate {
+  id: string;
+  name: string;
+  logoUrl: string;
+  header: string;
+  footer: string;
+  blocks: InvoiceBlock[];
+}
+
 export interface AppSettings {
   materials: Material[];
+  accessoryMaterials: AccessoryMaterial[];
+  invoiceTemplates: InvoiceTemplate[];
   printers: PrinterProfile[];
   defaultPrinterId: string;
   costs: CostSettings;
+  general: GeneralSettings;
+  /** True once the user has gone through Settings at least once after a fresh install. */
+  setupCompleted: boolean;
+}
+
+export type Language = "de" | "en";
+export type Currency = "EUR" | "USD";
+
+export interface GeneralSettings {
+  language: Language;
+  currency: Currency;
 }
 
 export interface CostBreakdownLine {

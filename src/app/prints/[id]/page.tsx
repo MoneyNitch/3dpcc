@@ -1,11 +1,16 @@
 import { notFound } from "next/navigation";
 import { getPrint, getPrintCostInputs, getSettings } from "@/lib/db";
 import { defaultCostInputs } from "@/lib/costCalculator";
+import { requireSetupComplete } from "@/lib/setupGuard";
 import { CostInputsProvider } from "@/lib/costInputsContext";
 import { CostCalculator } from "@/components/CostCalculator";
 import { ExtraCostsCard } from "@/components/ExtraCostsCard";
+import { InvoiceExport } from "@/components/InvoiceExport";
 import { DeletePrintButton } from "@/components/DeletePrintButton";
-import { categoryLabels, formatDuration, formatGrams } from "@/lib/format";
+import { PrintNameEditor } from "@/components/PrintNameEditor";
+import { PrintDataEditor } from "@/components/PrintDataEditor";
+import { categoryLabel, formatDuration, formatGrams } from "@/lib/format";
+import { translate } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +24,9 @@ export default async function PrintDetailPage({
   if (!print) notFound();
 
   const settings = await getSettings();
+  requireSetupComplete(settings);
+  const lang = settings.general.language;
+  const t = (key: Parameters<typeof translate>[1]) => translate(lang, key);
   // Merge over defaults so older saved cost inputs (pre-dating new fields) stay valid.
   const costInputs = { ...defaultCostInputs(settings), ...(await getPrintCostInputs(id)) };
   const { plate } = print;
@@ -27,12 +35,17 @@ export default async function PrintDetailPage({
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">{print.fileName}</h1>
+          <PrintNameEditor id={print.id} initialName={print.displayName ?? print.fileName} />
+          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{print.fileName}</p>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Hochgeladen am {new Date(print.createdAt).toLocaleString("de-DE")}
+            {t("print.uploadedAt")}{" "}
+            {new Date(print.createdAt).toLocaleString(lang === "en" ? "en-US" : "de-DE")}
           </p>
         </div>
-        <DeletePrintButton id={print.id} />
+        <div className="flex shrink-0 items-center gap-2">
+          <PrintDataEditor id={print.id} plate={plate} />
+          <DeletePrintButton id={print.id} />
+        </div>
       </div>
 
       <CostInputsProvider printId={print.id} initialInputs={costInputs}>
@@ -46,17 +59,17 @@ export default async function PrintDetailPage({
           )}
 
           <div className="grid grid-cols-3 gap-3 text-center">
-            <Stat label="Gesamtgewicht" value={formatGrams(plate.totalWeightGrams)} />
-            <Stat label="Druckzeit" value={formatDuration(plate.totalPrintTimeSeconds)} />
-            <Stat label="Layer" value={String(plate.layerCount)} />
+            <Stat label={t("print.totalWeight")} value={formatGrams(plate.totalWeightGrams)} />
+            <Stat label={t("print.printTime")} value={formatDuration(plate.totalPrintTimeSeconds)} />
+            <Stat label={t("print.layers")} value={String(plate.layerCount)} />
           </div>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm overflow-x-auto dark:border-slate-700 dark:bg-slate-800">
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Gewicht nach Teil</h2>
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("print.weightByPart")}</h2>
             <table className="mt-3 w-full min-w-[420px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-400 dark:text-slate-500">
-                  <th className="py-1.5 font-medium">Kategorie</th>
+                  <th className="py-1.5 font-medium">{t("print.category")}</th>
                   {plate.filaments.map((f) => (
                     <th key={f.filamentId} className="py-1.5 text-right font-medium">
                       <span className="inline-flex items-center justify-end gap-1.5">
@@ -68,13 +81,13 @@ export default async function PrintDetailPage({
                       </span>
                     </th>
                   ))}
-                  <th className="py-1.5 text-right font-medium">Gesamt</th>
+                  <th className="py-1.5 text-right font-medium">{t("print.total")}</th>
                 </tr>
               </thead>
               <tbody>
                 {plate.categoryTotals.map((c) => (
                   <tr key={c.category} className="border-t border-slate-100 dark:border-slate-700">
-                    <td className="py-1.5 text-slate-600 dark:text-slate-300">{categoryLabels[c.category] ?? c.category}</td>
+                    <td className="py-1.5 text-slate-600 dark:text-slate-300">{categoryLabel(c.category, lang)}</td>
                     {plate.filaments.map((f) => {
                       const mf = (plate.categoryByFilament ?? []).find(
                         (x) => x.filamentId === f.filamentId
@@ -90,7 +103,7 @@ export default async function PrintDetailPage({
                   </tr>
                 ))}
                 <tr className="border-t border-slate-300 font-semibold dark:border-slate-600 dark:text-slate-100">
-                  <td className="py-1.5">Gesamt</td>
+                  <td className="py-1.5">{t("print.total")}</td>
                   {plate.filaments.map((f) => {
                     const mf = (plate.categoryByFilament ?? []).find(
                       (x) => x.filamentId === f.filamentId
@@ -106,12 +119,12 @@ export default async function PrintDetailPage({
               </tbody>
             </table>
             <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
-              Anteilige Schätzung auf Basis der extrudierten Filamentlänge je Bauteil/Kategorie/Material.
+              {t("print.weightEstimateNote")}
             </p>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Objekte auf der Druckplatte</h2>
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("print.objectsOnPlate")}</h2>
             <div className="mt-3 flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
               {plate.objects.map((obj) => (
                 <div key={obj.objectId} className="py-3">
@@ -120,10 +133,14 @@ export default async function PrintDetailPage({
                     <span className="font-medium dark:text-slate-100">{formatGrams(obj.totalGrams)}</span>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-slate-500 dark:text-slate-400">
-                    {obj.maxHeightMm !== null && <span>Höhe: {obj.maxHeightMm.toFixed(2)} mm</span>}
+                    {obj.maxHeightMm !== null && (
+                      <span>
+                        {t("print.height")}: {obj.maxHeightMm.toFixed(2)} mm
+                      </span>
+                    )}
                     {obj.categories.map((c) => (
                       <span key={c.category}>
-                        {categoryLabels[c.category] ?? c.category}: {formatGrams(c.grams)}
+                        {categoryLabel(c.category, lang)}: {formatGrams(c.grams)}
                       </span>
                     ))}
                   </div>
@@ -133,7 +150,7 @@ export default async function PrintDetailPage({
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Filament / Farben</h2>
+            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("print.filamentsColors")}</h2>
             <div className="mt-3 flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
               {plate.filaments.map((f, i) => (
                 <div key={i} className="flex items-center gap-3 py-2 text-sm">
@@ -151,11 +168,12 @@ export default async function PrintDetailPage({
             </div>
           </section>
 
-          <ExtraCostsCard />
+          <ExtraCostsCard accessoryMaterials={settings.accessoryMaterials} />
         </div>
 
         <div>
           <CostCalculator plate={plate} settings={settings} />
+          <InvoiceExport print={print} settings={settings} />
         </div>
       </div>
       </CostInputsProvider>

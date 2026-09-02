@@ -315,6 +315,7 @@ export async function parse3mf(buffer: Buffer, fileName: string): Promise<Parsed
   return {
     id: randomUUID(),
     fileName,
+    displayName: fileName,
     createdAt: new Date().toISOString(),
     plate,
   };

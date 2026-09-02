@@ -6,7 +6,7 @@ import {
   saveDbConfig,
   type SaveDbConfigInput,
 } from "@/lib/dbConfig";
-import { resetStoreCache } from "@/lib/db";
+import { resetStoreCache, transferDatabaseData } from "@/lib/db";
 
 export async function GET() {
   return NextResponse.json({ config: getDbConfigView() });
@@ -47,14 +47,31 @@ async function testConnection(body: SaveDbConfigInput): Promise<void> {
 }
 
 export async function PUT(req: NextRequest) {
-  const body = (await req.json()) as SaveDbConfigInput;
+  const { transferData, ...body } = (await req.json()) as SaveDbConfigInput & { transferData?: boolean };
+  let connectionString: string | undefined;
 
   if (body.driver !== "sqlite") {
     try {
       await testConnection(body);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Verbindung fehlgeschlagen.";
-      return NextResponse.json({ error: `Verbindung fehlgeschlagen: ${message}` }, { status: 400 });
+      const message = err instanceof Error ? err.message : "Connection failed.";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+    const password = body.password || getStoredPassword();
+    connectionString = buildConnectionString(body.driver, {
+      host: body.host ?? "",
+      port: body.port ?? (body.driver === "mysql" ? 3306 : 5432),
+      database: body.database ?? "",
+      user: body.user ?? "",
+    }, password);
+  }
+
+  if (transferData) {
+    try {
+      await transferDatabaseData({ driver: body.driver, connectionString });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Datenübertragung fehlgeschlagen.";
+      return NextResponse.json({ error: message }, { status: 400 });
     }
   }
 

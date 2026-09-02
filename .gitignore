@@ -43,4 +43,9 @@ yarn-error.log*
 # local database (contains locally stored print & cost data)
 /data/
 
+# Uploaded and test 3MF files can contain private models and must never be committed
+*.3mf
+*.gcode.3mf
+
 next-env.d.ts
+AGENTS.md

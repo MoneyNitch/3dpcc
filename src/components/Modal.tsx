@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useLocale } from "@/lib/locale";
 
 export function Modal({
   title,
@@ -11,6 +12,7 @@ export function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const { t } = useLocale();
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -32,7 +34,7 @@ export function Modal({
           <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
           <button
             onClick={onClose}
-            aria-label="Schließen"
+            aria-label={t("modal.close")}
             className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-700"
           >
             ✕

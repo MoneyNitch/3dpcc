@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
     const parsed = await parse3mf(buffer, file.name);
+    const displayName = String(formData.get("displayName") ?? "").trim();
+    if (displayName) parsed.displayName = displayName.slice(0, 200);
     await insertPrint(parsed);
     return NextResponse.json({ print: parsed }, { status: 201 });
   } catch (err) {

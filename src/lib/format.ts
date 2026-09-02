@@ -1,9 +1,8 @@
+import type { Language } from "./types";
+import { translate } from "./i18n";
+
 export function formatGrams(g: number): string {
   return `${g.toFixed(1)} g`;
-}
-
-export function formatEuro(v: number): string {
-  return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(v);
 }
 
 export function formatDuration(seconds: number): string {
@@ -13,9 +12,7 @@ export function formatDuration(seconds: number): string {
   return `${h} h ${m} min`;
 }
 
-export const categoryLabels: Record<string, string> = {
-  model: "Modell",
-  support: "Stützen",
-  tower: "Spülturm",
-  other: "Sonstiges",
-};
+export function categoryLabel(category: string, lang: Language): string {
+  const key = `category.${category}` as Parameters<typeof translate>[1];
+  return translate(lang, key);
+}

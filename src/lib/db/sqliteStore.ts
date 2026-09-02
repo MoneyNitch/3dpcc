@@ -66,6 +66,14 @@ export function createSqliteStore(): DataStore {
     );
   }
 
+  async function savePrint(print: ParsedPrint): Promise<void> {
+    db.prepare("UPDATE prints SET file_name = ?, data = ? WHERE id = ?").run(
+      print.fileName,
+      JSON.stringify(print),
+      print.id
+    );
+  }
+
   async function listPrints(): Promise<ParsedPrint[]> {
     const rows = db
       .prepare("SELECT data FROM prints ORDER BY created_at DESC")
@@ -78,6 +86,16 @@ export function createSqliteStore(): DataStore {
       | { data: string }
       | undefined;
     return row ? (JSON.parse(row.data) as ParsedPrint) : null;
+  }
+
+  async function updatePrintName(id: string, displayName: string): Promise<void> {
+    const print = await getPrint(id);
+    if (!print) throw new Error("Druck nicht gefunden.");
+    db.prepare("UPDATE prints SET file_name = ?, data = ? WHERE id = ?").run(
+      displayName,
+      JSON.stringify({ ...print, displayName }),
+      id
+    );
   }
 
   async function deletePrint(id: string): Promise<void> {
@@ -102,8 +120,10 @@ export function createSqliteStore(): DataStore {
     getSettings,
     saveSettings,
     insertPrint,
+    savePrint,
     listPrints,
     getPrint,
+    updatePrintName,
     deletePrint,
     getPrintCostInputs,
     savePrintCostInputs,

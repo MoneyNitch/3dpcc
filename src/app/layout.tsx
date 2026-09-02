@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { getSettings } from "@/lib/db";
+import { LocaleProvider } from "@/lib/locale";
+import { Header } from "@/components/Header";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,10 +29,11 @@ try {
 } catch (e) {}
 `;
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const settings = await getSettings();
   return (
     <html
-      lang="de"
+      lang={settings.general.language}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
@@ -39,23 +41,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
-          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-            <Link href="/" className="flex items-center gap-2 font-semibold text-lg">
-              <span className="text-orange-500">🧵</span> 3D-PCC
-            </Link>
-            <nav className="flex items-center gap-4 text-sm font-medium text-slate-600 dark:text-slate-300">
-              <Link href="/" className="hover:text-orange-500">
-                Drucke
-              </Link>
-              <Link href="/settings" className="hover:text-orange-500">
-                Einstellungen
-              </Link>
-              <ThemeToggle />
-            </nav>
-          </div>
-        </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+        <LocaleProvider
+          initialLanguage={settings.general.language}
+          initialCurrency={settings.general.currency}
+        >
+          <Header />
+          <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+        </LocaleProvider>
       </body>
     </html>
   );

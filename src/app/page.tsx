@@ -1,18 +1,25 @@
-import { listPrints } from "@/lib/db";
+import { getSettings, listPrints } from "@/lib/db";
+import { requireSetupComplete } from "@/lib/setupGuard";
+import { translate } from "@/lib/i18n";
 import { UploadForm } from "@/components/UploadForm";
 import { PrintCard } from "@/components/PrintCard";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const settings = await getSettings();
+  requireSetupComplete(settings);
+  const lang = settings.general.language;
   const prints = await listPrints();
 
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Meine 3D-Drucke</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+          {translate(lang, "dashboard.title")}
+        </h1>
         <p className="mt-1 text-slate-500 dark:text-slate-400">
-          Lade eine gcode.3mf Datei hoch, um Material, Gewicht und Druckkosten zu berechnen.
+          {translate(lang, "dashboard.subtitle")}
         </p>
       </div>
 
@@ -20,12 +27,12 @@ export default async function HomePage() {
 
       {prints.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-400 dark:border-slate-700 dark:text-slate-500">
-          Noch keine Drucke gespeichert.
+          {translate(lang, "dashboard.empty")}
         </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {prints.map((print) => (
-            <PrintCard key={print.id} print={print} />
+            <PrintCard key={print.id} print={print} lang={lang} />
           ))}
         </div>
       )}

@@ -59,6 +59,15 @@ export function createMysqlStore(connectionString?: string): DataStore {
     );
   }
 
+  async function savePrint(print: ParsedPrint): Promise<void> {
+    await ready;
+    await pool.query("UPDATE prints SET file_name = ?, data = ? WHERE id = ?", [
+      print.fileName,
+      JSON.stringify(print),
+      print.id,
+    ]);
+  }
+
   async function listPrints(): Promise<ParsedPrint[]> {
     await ready;
     const [rows] = await pool.query<mysql.RowDataPacket[]>(
@@ -98,12 +107,25 @@ export function createMysqlStore(connectionString?: string): DataStore {
     ]);
   }
 
+  async function updatePrintName(id: string, displayName: string): Promise<void> {
+    await ready;
+    const print = await getPrint(id);
+    if (!print) throw new Error("Druck nicht gefunden.");
+    await pool.query("UPDATE prints SET file_name = ?, data = ? WHERE id = ?", [
+      displayName,
+      JSON.stringify({ ...print, displayName }),
+      id,
+    ]);
+  }
+
   return {
     getSettings,
     saveSettings,
     insertPrint,
+    savePrint,
     listPrints,
     getPrint,
+    updatePrintName,
     deletePrint,
     getPrintCostInputs,
     savePrintCostInputs,

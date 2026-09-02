@@ -1,14 +1,44 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { AppSettings, Material, PrinterProfile } from "@/lib/types";
+import type {
+  AccessoryMaterial,
+  AppSettings,
+  Currency,
+  Language,
+  Material,
+  PrinterProfile,
+} from "@/lib/types";
 import { randomUUID } from "@/lib/clientId";
+import { useLocale } from "@/lib/locale";
+import { currencySymbol } from "@/lib/i18n";
+
+type SettingsTab = "general" | "materials" | "accessories" | "printers" | "costs";
 
 export function SettingsForm({ initialSettings }: { initialSettings: AppSettings }) {
+  const router = useRouter();
+  const { t, setLocale, lang } = useLocale();
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
   const [saved, setSaved] = useState(false);
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
   const [printerSaved, setPrinterSaved] = useState(false);
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const unit = currencySymbol(settings.general.currency);
+  const formatDecimal = (value: number, maximumFractionDigits = 3) =>
+    new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+      useGrouping: false,
+      maximumFractionDigits,
+    }).format(value);
+  const parseDecimal = (value: string) =>
+    parseFloat(lang === "de" ? value.replace(",", ".") : value) || 0;
+  const tabs: { id: SettingsTab; label: string }[] = [
+    { id: "general", label: t("settings.general") },
+    { id: "materials", label: t("settings.materials") },
+    { id: "accessories", label: t("settings.accessoryMaterials") },
+    { id: "printers", label: t("settings.printers") },
+    { id: "costs", label: t("settings.costsTitle") },
+  ];
 
   function updateMaterial(id: string, patch: Partial<Material>) {
     setSettings((s) => ({
@@ -31,6 +61,35 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
 
   function removeMaterial(id: string) {
     setSettings((s) => ({ ...s, materials: s.materials.filter((m) => m.id !== id) }));
+    setSaved(false);
+  }
+
+  function updateAccessoryMaterial(id: string, patch: Partial<AccessoryMaterial>) {
+    setSettings((s) => ({
+      ...s,
+      accessoryMaterials: s.accessoryMaterials.map((item) =>
+        item.id === id ? { ...item, ...patch } : item
+      ),
+    }));
+    setSaved(false);
+  }
+
+  function addAccessoryMaterial() {
+    setSettings((s) => ({
+      ...s,
+      accessoryMaterials: [
+        ...s.accessoryMaterials,
+        { id: randomUUID(), name: "Neue Schraube", pricePerPack: 1, unitsPerPack: 1 },
+      ],
+    }));
+    setSaved(false);
+  }
+
+  function removeAccessoryMaterial(id: string) {
+    setSettings((s) => ({
+      ...s,
+      accessoryMaterials: s.accessoryMaterials.filter((item) => item.id !== id),
+    }));
     setSaved(false);
   }
 
@@ -82,13 +141,24 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
     setPrinterSaved(false);
   }
 
+  function updateGeneral(patch: Partial<AppSettings["general"]>) {
+    setSettings((s) => ({ ...s, general: { ...s.general, ...patch } }));
+    setSaved(false);
+  }
+
   async function save() {
+    const wasFirstRun = !settings.setupCompleted;
+    const payload = { ...settings, setupCompleted: true };
     await fetch("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
+      body: JSON.stringify(payload),
     });
+    setSettings(payload);
+    setLocale(payload.general.language, payload.general.currency);
     setSaved(true);
+    router.refresh();
+    if (wasFirstRun) router.push("/");
   }
 
   async function savePrinters() {
@@ -97,12 +167,66 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
   }
 
   const textInputClass =
-    "rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
+    "rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Materialien &amp; Preise</h2>
+      <div role="tablist" aria-label={t("settings.title")} className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-700">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            aria-controls={`${tab.id}-settings-panel`}
+            onClick={() => setActiveTab(tab.id)}
+            className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
+              activeTab === tab.id
+                ? "border-orange-500 text-orange-600 dark:text-orange-400"
+                : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <section
+        id="general-settings-panel"
+        role="tabpanel"
+        className={`${activeTab === "general" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
+      >
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("settings.general")}</h2>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <Field label={t("settings.language")}>
+            <select
+              value={settings.general.language}
+              onChange={(e) => updateGeneral({ language: e.target.value as Language })}
+              className={`w-full ${textInputClass}`}
+            >
+              <option value="de">Deutsch</option>
+              <option value="en">English</option>
+            </select>
+          </Field>
+          <Field label={t("settings.currency")}>
+            <select
+              value={settings.general.currency}
+              onChange={(e) => updateGeneral({ currency: e.target.value as Currency })}
+              className={`w-full ${textInputClass}`}
+            >
+              <option value="EUR">Euro (€)</option>
+              <option value="USD">US-Dollar ($)</option>
+            </select>
+          </Field>
+        </div>
+      </section>
+
+      <section
+        id="materials-settings-panel"
+        role="tabpanel"
+        className={`${activeTab === "materials" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
+      >
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("settings.materials")}</h2>
         <div className="mt-3 flex flex-col gap-3">
           {settings.materials.map((m) => (
             <div key={m.id} className="flex flex-wrap items-center gap-2">
@@ -116,28 +240,27 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
                 value={m.name}
                 onChange={(e) => updateMaterial(m.id, { name: e.target.value })}
                 className={`w-40 ${textInputClass}`}
-                placeholder="Name"
+                placeholder={t("settings.materialName")}
               />
               <input
                 value={m.type}
                 onChange={(e) => updateMaterial(m.id, { type: e.target.value })}
                 className={`w-24 ${textInputClass}`}
-                placeholder="Typ"
+                placeholder={t("settings.materialType")}
               />
               <input
-                type="number"
-                min={0}
-                step="0.1"
-                value={m.pricePerKg}
-                onChange={(e) => updateMaterial(m.id, { pricePerKg: parseFloat(e.target.value) || 0 })}
+                type="text"
+                inputMode="decimal"
+                defaultValue={formatDecimal(m.pricePerKg, 2)}
+                onChange={(e) => updateMaterial(m.id, { pricePerKg: parseDecimal(e.target.value) })}
                 className={`w-24 ${textInputClass}`}
               />
-              <span className="text-xs text-slate-400 dark:text-slate-500">€/kg</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500">{unit}/kg</span>
               <button
                 onClick={() => removeMaterial(m.id)}
                 className="ml-auto text-xs font-medium text-red-500 hover:underline dark:text-red-400"
               >
-                Entfernen
+                {t("extra.remove")}
               </button>
             </div>
           ))}
@@ -146,22 +269,90 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
           onClick={addMaterial}
           className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
         >
-          + Material hinzufügen
+          {t("settings.addMaterial")}
         </button>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <section
+        id="accessories-settings-panel"
+        role="tabpanel"
+        className={`${activeTab === "accessories" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
+      >
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+          {t("settings.accessoryMaterials")}
+        </h2>
+        <div className="mt-3 flex flex-col gap-3">
+          {settings.accessoryMaterials.map((item) => (
+            <div key={item.id} className="flex flex-wrap items-center gap-2">
+              <input
+                value={item.name}
+                onChange={(e) => updateAccessoryMaterial(item.id, { name: e.target.value })}
+                className={`w-40 ${textInputClass}`}
+                placeholder={t("settings.accessoryName")}
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                defaultValue={formatDecimal(item.pricePerPack, 2)}
+                onChange={(e) =>
+                  updateAccessoryMaterial(item.id, {
+                    pricePerPack: parseDecimal(e.target.value),
+                  })
+                }
+                className={`w-24 ${textInputClass}`}
+              />
+              <span className="text-xs text-slate-400 dark:text-slate-500">{unit}</span>
+              <input
+                type="number"
+                min={1}
+                step="1"
+                value={item.unitsPerPack}
+                onChange={(e) =>
+                  updateAccessoryMaterial(item.id, { unitsPerPack: parseInt(e.target.value, 10) || 1 })
+                }
+                className={`w-20 ${textInputClass}`}
+              />
+              <span className="text-xs text-slate-400 dark:text-slate-500">{t("settings.unitsPerPack")}</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {t("settings.costPerUnit")}: {unit}
+                {new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+                  minimumFractionDigits: 3,
+                  maximumFractionDigits: 3,
+                }).format(item.pricePerPack / Math.max(1, item.unitsPerPack))}
+              </span>
+              <button
+                onClick={() => removeAccessoryMaterial(item.id)}
+                className="ml-auto text-xs font-medium text-red-500 hover:underline dark:text-red-400"
+              >
+                {t("extra.remove")}
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={addAccessoryMaterial}
+          className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+        >
+          {t("settings.addAccessoryMaterial")}
+        </button>
+      </section>
+
+      <section
+        id="printers-settings-panel"
+        role="tabpanel"
+        className={`${activeTab === "printers" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
+      >
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Drucker</h2>
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("settings.printers")}</h2>
           <button
             onClick={addPrinter}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
           >
-            + Drucker hinzufügen
+            {t("settings.addPrinter")}
           </button>
         </div>
 
-        <Field label="Drucker auswählen">
+        <Field label={t("settings.selectPrinter")}>
           <select
             value={selectedPrinterId}
             onChange={(e) => setSelectedPrinterId(e.target.value)}
@@ -170,7 +361,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
             {settings.printers.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
-                {p.id === settings.defaultPrinterId ? " (Standard)" : ""}
+                {p.id === settings.defaultPrinterId ? ` ${t("cost.default")}` : ""}
               </option>
             ))}
           </select>
@@ -188,43 +379,43 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
                     checked={settings.defaultPrinterId === printer.id}
                     onChange={() => setDefaultPrinter(printer.id)}
                   />
-                  Als Standard-Drucker verwenden
+                  {t("settings.useAsDefault")}
                 </label>
                 <button
                   onClick={() => removePrinter(printer.id)}
                   disabled={settings.printers.length <= 1}
                   className="text-xs font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
                 >
-                  Entfernen
+                  {t("extra.remove")}
                 </button>
               </div>
               <div className="mt-3 grid gap-4 sm:grid-cols-2">
-                <Field label="Name">
+                <Field label={t("settings.printerName")}>
                   <input
                     value={printer.name}
                     onChange={(e) => updatePrinter(printer.id, { name: e.target.value })}
                     className={`w-full ${textInputClass}`}
                   />
                 </Field>
-                <Field label="Leistungsaufnahme (W)">
+                <Field label={t("settings.powerConsumption")}>
                   <NumberInput
                     value={printer.powerConsumptionW}
                     onChange={(v) => updatePrinter(printer.id, { powerConsumptionW: v })}
                   />
                 </Field>
-                <Field label="Anschaffungspreis (€)">
+                <Field label={`${t("settings.purchasePrice")} (${unit})`}>
                   <NumberInput
                     value={printer.purchasePrice}
                     onChange={(v) => updatePrinter(printer.id, { purchasePrice: v })}
                   />
                 </Field>
-                <Field label="Erwartete Lebensdauer (Stunden)">
+                <Field label={t("settings.lifetimeHours")}>
                   <NumberInput
                     value={printer.lifetimeHours}
                     onChange={(v) => updatePrinter(printer.id, { lifetimeHours: v })}
                   />
                 </Field>
-                <Field label="Wartungskosten (€/h)">
+                <Field label={`${t("settings.maintenanceCost")} (${unit}/h)`}>
                   <NumberInput
                     step={0.01}
                     value={printer.maintenanceCostPerHour}
@@ -236,55 +427,59 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
                 onClick={savePrinters}
                 className="mt-4 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
               >
-                {printerSaved ? "Gespeichert ✓" : "Drucker speichern"}
+                {printerSaved ? t("settings.saved") : t("settings.savePrinter")}
               </button>
             </div>
           ))}
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Kosten &amp; Standardwerte</h2>
+      <section
+        id="costs-settings-panel"
+        role="tabpanel"
+        className={`${activeTab === "costs" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
+      >
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("settings.costsTitle")}</h2>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <Field label="Strompreis (€/kWh)">
+          <Field label={`${t("settings.electricityPrice")} (${unit}/kWh)`}>
             <NumberInput
               step={0.01}
               value={settings.costs.electricityPricePerKwh}
               onChange={(v) => setSettings((s) => ({ ...s, costs: { ...s.costs, electricityPricePerKwh: v } }))}
             />
           </Field>
-          <Field label="Verschleiß/Abnutzung (€/h)">
+          <Field label={`${t("settings.wearAndTear")} (${unit}/h)`}>
             <NumberInput
               step={0.01}
               value={settings.costs.wearAndTearPerHour}
               onChange={(v) => setSettings((s) => ({ ...s, costs: { ...s.costs, wearAndTearPerHour: v } }))}
             />
           </Field>
-          <Field label="Stundenlohn (€/h)">
+          <Field label={`${t("settings.laborRate")} (${unit}/h)`}>
             <NumberInput
               value={settings.costs.laborRatePerHour}
               onChange={(v) => setSettings((s) => ({ ...s, costs: { ...s.costs, laborRatePerHour: v } }))}
             />
           </Field>
-          <Field label="Standard-Arbeitszeit (Minuten)">
+          <Field label={t("settings.defaultLaborMinutes")}>
             <NumberInput
               value={settings.costs.defaultLaborMinutes}
               onChange={(v) => setSettings((s) => ({ ...s, costs: { ...s.costs, defaultLaborMinutes: v } }))}
             />
           </Field>
-          <Field label="Standard-Verpackungskosten (€)">
+          <Field label={`${t("settings.defaultPackaging")} (${unit})`}>
             <NumberInput
               step={0.1}
               value={settings.costs.packagingCost}
               onChange={(v) => setSettings((s) => ({ ...s, costs: { ...s.costs, packagingCost: v } }))}
             />
           </Field>
-          <Field label="Standard-Gewinnmarge (%)">
+          <Field label={t("settings.defaultMargin")}>
             <NumberInput
               value={settings.costs.marginPercent}
               onChange={(v) => setSettings((s) => ({ ...s, costs: { ...s.costs, marginPercent: v } }))}
             />
           </Field>
-          <Field label="MwSt. (%)">
+          <Field label={t("settings.tax")}>
             <NumberInput
               value={settings.costs.vatPercent}
               onChange={(v) => setSettings((s) => ({ ...s, costs: { ...s.costs, vatPercent: v } }))}
@@ -297,7 +492,11 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
         onClick={save}
         className="self-start rounded-lg bg-orange-500 px-5 py-2.5 font-medium text-white hover:bg-orange-600"
       >
-        {saved ? "Gespeichert ✓" : "Einstellungen speichern"}
+        {!initialSettings.setupCompleted
+          ? t("settings.finishSetup")
+          : saved
+            ? t("settings.saved")
+            : t("settings.save")}
       </button>
     </div>
   );
@@ -321,13 +520,19 @@ function NumberInput({
   onChange: (v: number) => void;
   step?: number;
 }) {
+  const { lang } = useLocale();
+  const formatDecimal = new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+    useGrouping: false,
+    maximumFractionDigits: 3,
+  }).format(value);
   return (
     <input
-      type="number"
+      type="text"
+      inputMode="decimal"
       step={step}
-      value={value}
-      onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+      defaultValue={formatDecimal}
+      onChange={(e) => onChange(parseFloat(lang === "de" ? e.target.value.replace(",", ".") : e.target.value) || 0)}
+      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
     />
   );
 }

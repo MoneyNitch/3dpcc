@@ -7,10 +7,12 @@ export function Modal({
   title,
   onClose,
   children,
+  wide = false,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  wide?: boolean;
 }) {
   const { t } = useLocale();
   useEffect(() => {
@@ -28,7 +30,7 @@ export function Modal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-slate-800"
+        className={`w-full rounded-xl bg-white p-5 shadow-xl dark:bg-slate-800 ${wide ? "max-w-4xl" : "max-w-md"}`}
       >
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{title}</h3>

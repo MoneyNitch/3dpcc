@@ -14,7 +14,7 @@ import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol } from "@/lib/i18n";
 
-type SettingsTab = "general" | "materials" | "accessories" | "printers" | "costs";
+type SettingsTab = "general" | "materials" | "accessories" | "printers" | "numbering" | "costs";
 
 export function SettingsForm({ initialSettings }: { initialSettings: AppSettings }) {
   const router = useRouter();
@@ -37,8 +37,17 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
     { id: "materials", label: t("settings.materials") },
     { id: "accessories", label: t("settings.accessoryMaterials") },
     { id: "printers", label: t("settings.printers") },
+    { id: "numbering", label: t("settings.numbering") },
     { id: "costs", label: t("settings.costsTitle") },
   ];
+
+  function updateNumbering(kind: "invoice" | "quote", patch: Partial<AppSettings["numbering"]["invoice"]>) {
+    setSettings((s) => ({
+      ...s,
+      numbering: { ...s.numbering, [kind]: { ...s.numbering[kind], ...patch } },
+    }));
+    setSaved(false);
+  }
 
   function updateMaterial(id: string, patch: Partial<Material>) {
     setSettings((s) => ({
@@ -431,6 +440,81 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
               </button>
             </div>
           ))}
+      </section>
+
+      <section
+        id="numbering-settings-panel"
+        role="tabpanel"
+        className={`${activeTab === "numbering" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
+      >
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("settings.numbering")}</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.numberingHint")}</p>
+
+        <div className="mt-4 grid gap-6 sm:grid-cols-2">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("nav.invoices")}</h3>
+            <div className="mt-2 grid gap-3">
+              <Field label={t("settings.numberPrefix")}>
+                <input
+                  value={settings.numbering.invoice.prefix}
+                  onChange={(e) => updateNumbering("invoice", { prefix: e.target.value })}
+                  className={`w-full ${textInputClass}`}
+                />
+              </Field>
+              <Field label={t("settings.nextNumber")}>
+                <input
+                  type="number"
+                  min={1}
+                  value={settings.numbering.invoice.nextNumber}
+                  onChange={(e) => updateNumbering("invoice", { nextNumber: parseInt(e.target.value, 10) || 1 })}
+                  className={`w-full ${textInputClass}`}
+                />
+              </Field>
+              <Field label={t("settings.numberDigits")}>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={settings.numbering.invoice.digits}
+                  onChange={(e) => updateNumbering("invoice", { digits: parseInt(e.target.value, 10) || 1 })}
+                  className={`w-full ${textInputClass}`}
+                />
+              </Field>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("nav.quotes")}</h3>
+            <div className="mt-2 grid gap-3">
+              <Field label={t("settings.numberPrefix")}>
+                <input
+                  value={settings.numbering.quote.prefix}
+                  onChange={(e) => updateNumbering("quote", { prefix: e.target.value })}
+                  className={`w-full ${textInputClass}`}
+                />
+              </Field>
+              <Field label={t("settings.nextNumber")}>
+                <input
+                  type="number"
+                  min={1}
+                  value={settings.numbering.quote.nextNumber}
+                  onChange={(e) => updateNumbering("quote", { nextNumber: parseInt(e.target.value, 10) || 1 })}
+                  className={`w-full ${textInputClass}`}
+                />
+              </Field>
+              <Field label={t("settings.numberDigits")}>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={settings.numbering.quote.digits}
+                  onChange={(e) => updateNumbering("quote", { digits: parseInt(e.target.value, 10) || 1 })}
+                  className={`w-full ${textInputClass}`}
+                />
+              </Field>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section

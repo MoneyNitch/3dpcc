@@ -95,7 +95,10 @@ export interface CostSettings {
   wearAndTearPerHour: number;
 }
 
-export type InvoiceBlockType = "text" | "variables" | "lineItems" | "totals" | "spacer";
+export type PaperFormat = "A4" | "A5" | "Letter" | "Legal";
+export type PaperOrientation = "portrait" | "landscape";
+
+export type InvoiceElementType = "text" | "variables" | "image" | "qrcode" | "lineItems" | "totals";
 
 export type InvoiceCostLine =
   | "material"
@@ -107,10 +110,18 @@ export type InvoiceCostLine =
   | "margin"
   | "tax";
 
-export interface InvoiceBlock {
+/** A single freely placed field on the invoice sheet, positioned/sized in millimeters. */
+export interface InvoiceElement {
   id: string;
-  type: InvoiceBlockType;
+  type: InvoiceElementType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Text/variables content, image data URL, or QR code value (all support {{variables}}). */
   content?: string;
+  fontSize?: number;
+  align?: "left" | "center" | "right";
   lineLabels?: Partial<Record<InvoiceCostLine, string>>;
   hiddenLines?: InvoiceCostLine[];
   distributeMargin?: boolean;
@@ -122,22 +133,34 @@ export interface InvoiceBlock {
 export interface InvoiceTemplate {
   id: string;
   name: string;
-  logoUrl: string;
-  header: string;
-  footer: string;
-  blocks: InvoiceBlock[];
+  paperFormat: PaperFormat;
+  orientation: PaperOrientation;
+  elements: InvoiceElement[];
   /** User defined variables, e.g. companyName -> "Muster GmbH". */
   customValues?: Record<string, string>;
+}
+
+/** Controls how {{invoiceNumber}} is auto-generated for a document kind. */
+export interface DocumentNumberingSettings {
+  prefix: string;
+  nextNumber: number;
+  /** Zero-padded length of the running number, e.g. 4 -> 0007. */
+  digits: number;
 }
 
 export interface AppSettings {
   materials: Material[];
   accessoryMaterials: AccessoryMaterial[];
   invoiceTemplates: InvoiceTemplate[];
+  quoteTemplates: InvoiceTemplate[];
   printers: PrinterProfile[];
   defaultPrinterId: string;
   costs: CostSettings;
   general: GeneralSettings;
+  numbering: {
+    invoice: DocumentNumberingSettings;
+    quote: DocumentNumberingSettings;
+  };
   /** True once the user has gone through Settings at least once after a fresh install. */
   setupCompleted: boolean;
 }

@@ -15,6 +15,7 @@ export async function Header() {
         <nav className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-300">
           <Link href="/">{translate(lang, "nav.prints")}</Link>
           <Link href="/invoices">{translate(lang, "nav.invoices")}</Link>
+          <Link href="/quotes">{translate(lang, "nav.quotes")}</Link>
           <Link href="/settings">{translate(lang, "nav.settings")}</Link>
           <ThemeToggle initialTheme={theme} />
         </nav>

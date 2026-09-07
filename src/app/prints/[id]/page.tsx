@@ -174,6 +174,7 @@ export default async function PrintDetailPage({
         <div>
           <CostCalculator plate={plate} settings={settings} />
           <InvoiceExport print={print} settings={settings} />
+          <InvoiceExport print={print} settings={settings} kind="quote" />
         </div>
       </div>
       </CostInputsProvider>

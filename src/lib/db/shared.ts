@@ -1,4 +1,5 @@
-import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
+import type { AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, ParsedPrint, PrintCostInputs } from "../types";
+import { randomUUID } from "../clientId";
 
 /** Storage backend contract implemented by each supported database driver. */
 export interface DataStore {
@@ -25,14 +26,31 @@ export const defaultSettings: AppSettings = {
     {
       id: "default-invoice-template",
       name: "Standardrechnung",
-      logoUrl: "",
-      header: "{{companyName}}\n{{companyAddress}}",
-      footer: "Vielen Dank für Ihren Auftrag.",
-      blocks: [
-        { id: "customer", type: "variables", content: "{{customerName}}\n{{customerAddress}}" },
-        { id: "intro", type: "text", content: "Rechnung {{invoiceNumber}} vom {{invoiceDate}}" },
-        { id: "items", type: "lineItems" },
-        { id: "totals", type: "totals" },
+      paperFormat: "A4",
+      orientation: "portrait",
+      elements: [
+        { id: "header", type: "text", x: 20, y: 15, width: 100, height: 25, content: "{{companyName}}\n{{companyAddress}}", fontSize: 11, align: "left" },
+        { id: "customer", type: "variables", x: 20, y: 50, width: 90, height: 25, content: "{{customerName}}\n{{customerAddress}}", fontSize: 11, align: "left" },
+        { id: "meta", type: "variables", x: 130, y: 50, width: 60, height: 25, content: "Rechnung {{invoiceNumber}}\n{{invoiceDate}}", fontSize: 11, align: "left" },
+        { id: "items", type: "lineItems", x: 20, y: 90, width: 170, height: 100 },
+        { id: "totals", type: "totals", x: 110, y: 195, width: 80, height: 45 },
+        { id: "footer", type: "text", x: 20, y: 270, width: 170, height: 15, content: "Vielen Dank für Ihren Auftrag.", fontSize: 9, align: "left" },
+      ],
+    },
+  ],
+  quoteTemplates: [
+    {
+      id: "default-quote-template",
+      name: "Standardangebot",
+      paperFormat: "A4",
+      orientation: "portrait",
+      elements: [
+        { id: "header", type: "text", x: 20, y: 15, width: 100, height: 25, content: "{{companyName}}\n{{companyAddress}}", fontSize: 11, align: "left" },
+        { id: "customer", type: "variables", x: 20, y: 50, width: 90, height: 25, content: "{{customerName}}\n{{customerAddress}}", fontSize: 11, align: "left" },
+        { id: "meta", type: "variables", x: 130, y: 50, width: 60, height: 25, content: "Angebot {{invoiceNumber}}\n{{invoiceDate}}", fontSize: 11, align: "left" },
+        { id: "items", type: "lineItems", x: 20, y: 90, width: 170, height: 100 },
+        { id: "totals", type: "totals", x: 110, y: 195, width: 80, height: 45 },
+        { id: "footer", type: "text", x: 20, y: 270, width: 170, height: 15, content: "Dieses Angebot ist bis {{dueDate}} gültig.", fontSize: 9, align: "left" },
       ],
     },
   ],
@@ -60,6 +78,10 @@ export const defaultSettings: AppSettings = {
     language: "de",
     currency: "EUR",
   },
+  numbering: {
+    invoice: { prefix: "R", nextNumber: 1, digits: 4 },
+    quote: { prefix: "A", nextNumber: 1, digits: 4 },
+  },
   setupCompleted: false,
 };
 
@@ -84,6 +106,14 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (!result.invoiceTemplates) {
     result = { ...result, invoiceTemplates: defaultSettings.invoiceTemplates };
   }
+  result = { ...result, invoiceTemplates: result.invoiceTemplates.map(migrateInvoiceTemplate) };
+  if (!result.quoteTemplates) {
+    result = { ...result, quoteTemplates: defaultSettings.quoteTemplates };
+  }
+  result = { ...result, quoteTemplates: result.quoteTemplates.map(migrateInvoiceTemplate) };
+  if (!result.numbering) {
+    result = { ...result, numbering: defaultSettings.numbering };
+  }
   if (result.setupCompleted === undefined) {
     // Settings saved before this field existed were already configured by someone,
     // so treat them as set up rather than forcing an unexpected redirect.
@@ -91,3 +121,47 @@ export function migrateSettings(raw: unknown): AppSettings {
   }
   return result;
 }
+
+// Migrates invoice templates saved before the free-form element designer (linear
+// header/footer/blocks layout) into absolutely positioned elements.
+function migrateInvoiceTemplate(raw: unknown): InvoiceTemplate {
+  const template = raw as InvoiceTemplate & {
+    logoUrl?: string;
+    header?: string;
+    footer?: string;
+    blocks?: { id: string; type: string; content?: string }[];
+  };
+  if (template.elements && template.paperFormat) return template as InvoiceTemplate;
+
+  const elements: InvoiceElement[] = [];
+  let y = 15;
+  if (template.logoUrl) {
+    elements.push({ id: randomUUID(), type: "image", x: 150, y: 15, width: 40, height: 25, content: template.logoUrl });
+  }
+  if (template.header) {
+    elements.push({ id: randomUUID(), type: "text", x: 20, y, width: 110, height: 25, content: template.header, fontSize: 11, align: "left" });
+    y += 30;
+  }
+  for (const block of template.blocks ?? []) {
+    if (block.type === "spacer") {
+      y += 10;
+      continue;
+    }
+    const height = block.type === "lineItems" ? 100 : block.type === "totals" ? 45 : 20;
+    elements.push({ id: block.id, type: block.type as InvoiceElementType, content: block.content, x: 20, y, width: 170, height, fontSize: 11, align: "left" });
+    y += height + 8;
+  }
+  if (template.footer) {
+    elements.push({ id: randomUUID(), type: "text", x: 20, y: 270, width: 170, height: 15, content: template.footer, fontSize: 9, align: "left" });
+  }
+
+  return {
+    id: template.id,
+    name: template.name,
+    paperFormat: template.paperFormat ?? "A4",
+    orientation: template.orientation ?? "portrait",
+    elements,
+    customValues: template.customValues,
+  };
+}
+

@@ -6,7 +6,7 @@ tower and total) and multi-color information, and calculates print costs.
 
 > This project is a hobby project and is currently in Early Access. It is still
 > under active development, so errors, missing features, or incomplete
-> functionality may occur. Feedback and suggestions are welcome.
+> functionality may occur. Feedback and suggestions are welcome. This is my first open-source project, and I also plan to program a large part of it using AI, since I wanted to test it out.
 
 ## Features
 

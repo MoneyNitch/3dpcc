@@ -18,6 +18,14 @@ tower and total) and multi-color information, and calculates print costs.
   profit margin and tax
 - Configurable material prices, printer profiles and cost settings
 
+## Roadmap
+
+- Use projects from BambuStudio and OrcaSlicer for calculations.
+- Manual entry of 3D prints.
+- And more.
+
+> I’d be happy to receive any suggestions.
+
 ## Requirements
 
 - **Node.js >= 22**. This is required by `better-sqlite3`; older versions can

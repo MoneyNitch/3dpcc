@@ -4,9 +4,11 @@ Local 3D printing cost calculator. It uploads `*.gcode.3mf` files exported by
 Bambu Studio or OrcaSlicer, reads material, weight (model, supports, prime
 tower and total) and multi-color information, and calculates print costs.
 
+> Important Note: This project is not intended for use on the public network and may pose a risk. Please use it only on a private network at this time.
+
 > This project is a hobby project and is currently in Early Access. It is still
 > under active development, so errors, missing features, or incomplete
-> functionality may occur. Feedback and suggestions are welcome. This is my first open-source project, and I also plan to program a large part of it using AI, since I wanted to test it out.
+> functionality may occur. Feedback and suggestions are welcome. This is my first open-source project, and I also plan to program a large part of it using AI, since I wanted to test it out. 
 
 ## Features
 

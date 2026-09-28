@@ -2,6 +2,7 @@ import { getSettings, listPrints } from "@/lib/db";
 import { requireSetupComplete } from "@/lib/setupGuard";
 import { translate } from "@/lib/i18n";
 import { UploadForm } from "@/components/UploadForm";
+import { ManualPrintForm } from "@/components/ManualPrintForm";
 import { PrintCard } from "@/components/PrintCard";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,7 @@ export default async function HomePage() {
       </div>
 
       <UploadForm />
+      <ManualPrintForm materials={settings.materials} />
 
       {prints.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-400 dark:border-slate-700 dark:text-slate-500">

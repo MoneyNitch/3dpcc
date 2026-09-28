@@ -36,14 +36,14 @@ export default async function PrintDetailPage({
       <div className="flex items-start justify-between gap-4">
         <div>
           <PrintNameEditor id={print.id} initialName={print.displayName ?? print.fileName} />
-          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{print.fileName}</p>
+          {!print.manual && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{print.fileName}</p>}
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            {t("print.uploadedAt")}{" "}
+            {t(print.manual ? "manual.createdAt" : "print.uploadedAt")}{" "}
             {new Date(print.createdAt).toLocaleString(lang === "en" ? "en-US" : "de-DE")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <PrintDataEditor id={print.id} plate={plate} />
+          <PrintDataEditor id={print.id} plate={plate} manual={print.manual} materials={settings.materials} />
           <DeletePrintButton id={print.id} />
         </div>
       </div>
@@ -58,10 +58,10 @@ export default async function PrintDetailPage({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3 text-center">
+          <div className={`grid gap-3 text-center ${print.manual ? "grid-cols-2" : "grid-cols-3"}`}>
             <Stat label={t("print.totalWeight")} value={formatGrams(plate.totalWeightGrams)} />
             <Stat label={t("print.printTime")} value={formatDuration(plate.totalPrintTimeSeconds)} />
-            <Stat label={t("print.layers")} value={String(plate.layerCount)} />
+            {!print.manual && <Stat label={t("print.layers")} value={String(plate.layerCount)} />}
           </div>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm overflow-x-auto dark:border-slate-700 dark:bg-slate-800">
@@ -118,9 +118,9 @@ export default async function PrintDetailPage({
                 </tr>
               </tbody>
             </table>
-            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+            {!print.manual && <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
               {t("print.weightEstimateNote")}
-            </p>
+            </p>}
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">

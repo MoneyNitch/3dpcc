@@ -56,6 +56,7 @@ export interface ParsedPrint {
   id: string;
   fileName: string;
   displayName?: string;
+  manual?: boolean;
   createdAt: string;
   plate: ParsedPlate;
 }

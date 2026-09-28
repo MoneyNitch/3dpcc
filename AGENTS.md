@@ -19,11 +19,16 @@ Tailwind CSS v4, and server-side database access.
 - `npm install`: install dependencies for the current OS/CPU.
 - `npm run dev`: start the development server. `PORT=xxxx` can be set in
 	`.env.local` and is loaded by `scripts/with-env.js` before Next starts.
-- `npm run build`: production build using Turbopack.
-- `npm run build:webpack`: production build fallback for Raspberry Pi/ARM
-	devices where Turbopack may crash.
+- `npm run dev:webpack`: start development with Webpack if Turbopack is blocked
+	by platform/native-binding issues.
+- `npm run build`: production build.
+- `npm run build:webpack`: Webpack build fallback for Raspberry Pi/ARM or
+	platform/native-binding issues.
 - `npm run start`: start the production build; run `npm run build` first.
 - `npm run lint`: run ESLint.
+
+See [README.md](README.md) for production/background startup, Docker, and
+Raspberry Pi setup details.
 
 Node.js must be version 22 or newer because `better-sqlite3@13` requires it.
 
@@ -33,13 +38,20 @@ Node.js must be version 22 or newer because `better-sqlite3@13` requires it.
 	completion before showing the dashboard.
 - `src/app/prints/[id]/page.tsx`: print detail, per-material weight matrix,
 	object breakdown, extra costs, and calculator.
-- `src/app/settings/page.tsx`: database, language/currency, materials, printer,
-	and cost settings.
-- `src/components/`: client UI components. Shared print calculator state lives
-	in `src/lib/costInputsContext.tsx` so `CostCalculator` and `ExtraCostsCard`
-	can edit the same saved project inputs.
+- `src/app/invoices/page.tsx` and `src/app/quotes/page.tsx`: invoice and quote
+	workflows; both require setup completion.
+- `src/app/settings/page.tsx`: database, language/currency, materials,
+	accessory materials, printers, costs, invoice/quote templates, and numbering.
+- Pages and API routes access the server-side database. Client components use
+	API routes for persistence; shared print calculator state is provided by
+	`src/lib/costInputsContext.tsx` so `CostCalculator` and `ExtraCostsCard` can
+	edit the same saved project inputs.
 - `src/lib/threemf/parser.ts`: parses Bambu Studio/OrcaSlicer `.gcode.3mf`
 	archives. It needs `Metadata/slice_info.config` and `Metadata/plate_N.gcode`.
+- Slicer metadata provides authoritative per-filament totals when available;
+	G-code header weights are the fallback. Object/category weights are estimates
+	that distribute per-filament totals according to positive extrusion parsed
+	from G-code, not exact per-object slicer measurements.
 - `src/lib/threemf/gcodeAnalyzer.ts`: tracks positive extrusion by object,
 	category, and real T-tool slot. It ignores firmware placeholder tools such
 	as `T1000` and `T65535`.
@@ -48,8 +60,11 @@ Node.js must be version 22 or newer because `better-sqlite3@13` requires it.
 - `src/lib/i18n.ts` and `src/lib/locale.tsx`: German/English translations and
 	locale-aware EUR/USD formatting. In English, German `MwSt.` must be labelled
 	`Tax`, not `VAT`.
-- `src/lib/setupGuard.ts`: redirects first-time users to `/settings` until the
-	main settings form saves `setupCompleted: true`.
+- `src/lib/locale.tsx` initializes client locale access from the async root
+	layout; use `useLocale()` in client components and `translate()` in server
+	components.
+- `src/lib/setupGuard.ts`: redirects first-time users from the dashboard,
+	print detail, invoices, and quotes to `/settings` until setup is completed.
 
 ## Database
 
@@ -67,9 +82,16 @@ and callers must use `await`. `dbConfig.ts` stores UI database configuration in
 never returned to the browser, and remote credentials are connection-tested
 before they are saved. The entire `data/` directory is gitignored.
 
-When adding fields to persisted JSON, update `defaultCostInputs`,
-`defaultSettings`, and the relevant migration/fallback logic so existing local
-databases continue to work.
+When changing persisted data, update the owning compatibility path: settings
+fields belong in `defaultSettings` and `migrateSettings` in `shared.ts`; print
+cost-input fields belong in `defaultCostInputs` in `costCalculator.ts` and must
+remain compatible with older saved inputs. Print records are parsed from stored
+JSON without a general schema migration, so add fallbacks for newly introduced
+optional fields when reading older records.
+
+Invoice and quote templates are separate settings collections. Their shared
+designer lives in `src/components/InvoiceTemplateBuilder.tsx`; invoice document
+logic is in `src/lib/invoice.ts`.
 
 ## Raspberry Pi
 
@@ -87,6 +109,10 @@ If `npm run build` crashes with `SIGSEGV` during page-data collection, first
 run `node -e "require('better-sqlite3')"`. Rebuild it with
 `npm rebuild better-sqlite3 --build-from-source` if that crashes; otherwise use
 `npm run build:webpack`. Low-memory Pis may need additional swap.
+
+For Docker deployment and bind-mount permissions, follow the Docker section in
+the README. The mounted `data/` directory must be writable by the container's
+non-root user.
 
 ## Editing Guidance
 

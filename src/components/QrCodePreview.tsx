@@ -15,7 +15,10 @@ export function QrCodePreview({ value, className }: { value: string; className?:
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
-    QRCode.toCanvas(canvas, value, { margin: 0, width: 256 }).catch(() => {});
+    QRCode.toCanvas(canvas, value, { margin: 0, width: 256 }).then(() => {
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+    }).catch(() => {});
   }, [value]);
 
   return <canvas ref={canvasRef} className={className} style={{ width: "100%", height: "100%" }} />;

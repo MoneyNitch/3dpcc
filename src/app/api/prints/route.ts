@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { insertPrint, listPrints } from "@/lib/db";
 import { parse3mf } from "@/lib/threemf/parser";
+import type { ParsedPrint } from "@/lib/types";
+import { readPrintImage } from "@/lib/printImage";
+import { parseManualFilaments, parseManualCategories, manualBreakdown } from "@/lib/manualPrint";
 
 export async function GET() {
   const prints = await listPrints();
@@ -9,6 +12,47 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
+  if (formData.get("mode") === "manual") {
+    const name = String(formData.get("name") ?? "").trim();
+    const minutes = Number(formData.get("minutes"));
+    const filaments = parseManualFilaments(formData.get("filaments"));
+    const categoryByFilament = filaments && parseManualCategories(formData.get("categoryByFilament"), filaments);
+    const image = formData.get("image");
+    if (!name || name.length > 200 || !filaments || !categoryByFilament ||
+      !Number.isFinite(minutes) || minutes < 0 || !Number.isFinite(minutes * 60)) {
+      return NextResponse.json({ error: "Ungültige Druckdaten." }, { status: 400 });
+    }
+    const breakdown = manualBreakdown(name, filaments, categoryByFilament);
+    let thumbnailBase64: string | null;
+    try {
+      thumbnailBase64 = await readPrintImage(image);
+    } catch (error) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+    }
+    const print: ParsedPrint = {
+      id: crypto.randomUUID(),
+      fileName: name,
+      displayName: name,
+      manual: true,
+      createdAt: new Date().toISOString(),
+      plate: {
+        totalWeightGrams: breakdown.totalWeightGrams,
+        printTimeSeconds: minutes * 60,
+        totalPrintTimeSeconds: minutes * 60,
+        layerCount: 0,
+        nozzleDiameterMm: null,
+        printerModelId: null,
+        bedType: null,
+        filaments,
+        objects: breakdown.objects,
+        categoryTotals: breakdown.categoryTotals,
+        categoryByFilament: breakdown.categoryByFilament,
+        thumbnailBase64,
+      },
+    };
+    await insertPrint(print);
+    return NextResponse.json({ print }, { status: 201 });
+  }
   const file = formData.get("file");
 
   if (!file || !(file instanceof File)) {

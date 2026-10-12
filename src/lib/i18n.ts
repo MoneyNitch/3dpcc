@@ -96,6 +96,7 @@ const strings: Record<string, Record<Language, string>> = {
   "settings.welcomeBody": { de: "Richte zuerst Materialien, Drucker und Kosten ein.", en: "Set up your materials, printer and costs first." },
   "settings.finishSetup": { de: "Einrichtung abschließen", en: "Finish setup" },
   "settings.general": { de: "Allgemein", en: "General" },
+  "settings.version": { de: "Version", en: "Version" },
   "settings.language": { de: "Sprache", en: "Language" },
   "settings.currency": { de: "Währung", en: "Currency" },
   "settings.materials": { de: "Materialien & Preise", en: "Materials & prices" },

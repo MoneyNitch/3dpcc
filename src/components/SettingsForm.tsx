@@ -13,6 +13,7 @@ import type {
 import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol } from "@/lib/i18n";
+import packageJson from "../../package.json";
 
 type SettingsTab = "general" | "materials" | "accessories" | "printers" | "numbering" | "costs";
 
@@ -228,6 +229,9 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
             </select>
           </Field>
         </div>
+        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
+          {t("settings.version")}: {packageJson.version}
+        </p>
       </section>
 
       <section

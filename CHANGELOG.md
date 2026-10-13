@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.0 — Manual prints and QR code sizing
+
+### Added
+- **Manual print creation** without a slicer file: enter a name, print time,
+  material usage and an optional image (PNG, JPEG or WebP, up to 5 MB).
+- **Multiple filaments** for manual prints, each with its own material, color
+  and weight. Filaments can also be added, edited or removed later.
+- **Per-filament weight categories** for model, support, wipe tower and other
+  material. The category weights feed the print breakdown and cost calculation;
+  wipe tower material counts toward total usage but not object weight.
+- **Image editing** on print details: upload, replace or remove a print image.
+
+### Fixed
+- QR codes in the invoice and quote designer now scale with the selected field
+  size instead of remaining at a fixed canvas size and getting clipped.
+
 ## v0.3.0 — Free-form invoice & quote designer
 
 ### Added

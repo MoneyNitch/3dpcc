@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { readPrintImage } from "@/lib/printImage";
 import { manualBreakdown, parseManualCategories, parseManualFilaments } from "@/lib/manualPrint";
+import { getPreviewQueue } from "@/lib/previewQueue";
 
 export async function GET(
   _req: NextRequest,
@@ -28,6 +29,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  await (await getPreviewQueue()).cancel(id);
   await deletePrint(id);
   return NextResponse.json({ ok: true });
 }

@@ -18,6 +18,12 @@ async function ensureSchema(pool: Pool): Promise<void> {
       data TEXT NOT NULL
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS print_models (
+      id TEXT PRIMARY KEY,
+      data BYTEA NOT NULL
+    )
+  `);
 }
 
 /** PostgreSQL backend. Pass an explicit connection string, or omit to read DATABASE_URL. */
@@ -84,9 +90,24 @@ export function createPostgresStore(connectionString?: string): DataStore {
     return rows[0] ? (JSON.parse(rows[0].data) as ParsedPrint) : null;
   }
 
+  async function savePrintModel(id: string, model: Buffer): Promise<void> {
+    await ready;
+    await pool.query(
+      "INSERT INTO print_models (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data",
+      [id, model]
+    );
+  }
+
+  async function getPrintModel(id: string): Promise<Buffer | null> {
+    await ready;
+    const { rows } = await pool.query<{ data: Buffer }>("SELECT data FROM print_models WHERE id = $1", [id]);
+    return rows[0]?.data ?? null;
+  }
+
   async function deletePrint(id: string): Promise<void> {
     await ready;
     await pool.query("DELETE FROM prints WHERE id = $1", [id]);
+    await pool.query("DELETE FROM print_models WHERE id = $1", [id]);
   }
 
   async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -124,6 +145,8 @@ export function createPostgresStore(connectionString?: string): DataStore {
     savePrint,
     listPrints,
     getPrint,
+    savePrintModel,
+    getPrintModel,
     updatePrintName,
     deletePrint,
     getPrintCostInputs,

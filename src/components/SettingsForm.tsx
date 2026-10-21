@@ -22,6 +22,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
   const { t, setLocale, lang } = useLocale();
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
   const [printerSaved, setPrinterSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
@@ -157,23 +158,31 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
   }
 
   async function save() {
+    setSaveError(false);
     const wasFirstRun = !settings.setupCompleted;
     const payload = { ...settings, setupCompleted: true };
-    await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`Settings save failed (${response.status}).`);
+    } catch (error) {
+      console.error("Failed to save settings:", error);
+      setSaveError(true);
+      return false;
+    }
     setSettings(payload);
     setLocale(payload.general.language, payload.general.currency);
     setSaved(true);
     router.refresh();
     if (wasFirstRun) router.push("/");
+    return true;
   }
 
   async function savePrinters() {
-    await save();
-    setPrinterSaved(true);
+    if (await save()) setPrinterSaved(true);
   }
 
   const textInputClass =
@@ -181,6 +190,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
 
   return (
     <div className="flex flex-col gap-6">
+      {saveError && <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{t("settings.saveFailed")}</p>}
       <div role="tablist" aria-label={t("settings.title")} className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-700">
         {tabs.map((tab) => (
           <button
@@ -231,6 +241,41 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
               <option value="USD">US-Dollar ($)</option>
             </select>
           </Field>
+        </div>
+        <label className="mt-4 flex items-start gap-3 text-sm text-slate-700 dark:text-slate-200">
+          <input
+            type="checkbox"
+            checked={settings.general.enable3dPreview}
+            onChange={(event) => updateGeneral({ enable3dPreview: event.target.checked })}
+            aria-describedby="preview-3d-description"
+            className="mt-1 h-4 w-4 accent-orange-500"
+          />
+          <span>
+            <span className="font-medium">{t("settings.enable3dPreview")}</span>
+            <span id="preview-3d-description" className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+              {t("settings.enable3dPreviewHelp")}
+            </span>
+          </span>
+        </label>
+        <div className="mt-4 max-w-xl">
+          <label htmlFor="preview-compute-percent" className="text-sm font-medium text-slate-700 dark:text-slate-200">
+            {t("settings.previewComputePercent")}: {settings.general.previewComputePercent}%
+          </label>
+          <input
+            id="preview-compute-percent"
+            type="range"
+            min={10}
+            max={100}
+            step={5}
+            value={settings.general.previewComputePercent}
+            disabled={!settings.general.enable3dPreview}
+            onChange={(event) => updateGeneral({ previewComputePercent: Number(event.target.value) })}
+            aria-describedby="preview-compute-help"
+            className="mt-2 block w-full accent-orange-500 disabled:opacity-50"
+          />
+          <p id="preview-compute-help" className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {t("settings.previewComputeHelp")}
+          </p>
         </div>
       </section>
 

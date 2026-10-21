@@ -52,6 +52,18 @@ export interface ParsedPlate {
   thumbnailBase64: string | null; // data URL
 }
 
+export interface ModelGeometry {
+  /** Missing on older saved triangle meshes. */
+  kind?: "mesh" | "toolpath";
+  /** Three XYZ points per mesh triangle, or two per toolpath segment, in millimeters. */
+  positions: number[];
+  /** One material color per triangle or segment. */
+  colors: string[];
+  /** Slicer-provided extrusion dimensions per toolpath segment, in millimeters. */
+  widths?: number[];
+  heights?: number[];
+}
+
 export interface ParsedPrint {
   id: string;
   fileName: string;
@@ -173,6 +185,8 @@ export type Theme = "light" | "dark";
 export interface GeneralSettings {
   language: Language;
   currency: Currency;
+  enable3dPreview: boolean;
+  previewComputePercent: number;
 }
 
 export interface CostBreakdownLine {

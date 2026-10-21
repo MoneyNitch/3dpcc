@@ -56,6 +56,14 @@ export async function getPrint(id: string): Promise<ParsedPrint | null> {
   return (await getStore()).getPrint(id);
 }
 
+export async function savePrintModel(id: string, model: Buffer): Promise<void> {
+  return (await getStore()).savePrintModel(id, model);
+}
+
+export async function getPrintModel(id: string): Promise<Buffer | null> {
+  return (await getStore()).getPrintModel(id);
+}
+
 export async function updatePrintName(id: string, displayName: string): Promise<void> {
   return (await getStore()).updatePrintName(id, displayName);
 }
@@ -87,6 +95,8 @@ export async function transferDatabaseData(targetConnection: ResolvedDbConnectio
   await target.saveSettings(settings);
   for (const print of prints) {
     await target.insertPrint(print);
+    const model = await source.getPrintModel(print.id);
+    if (model) await target.savePrintModel(print.id, model);
     const inputs = await source.getPrintCostInputs(print.id);
     if (inputs) await target.savePrintCostInputs(print.id, inputs);
   }

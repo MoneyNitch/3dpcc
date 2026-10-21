@@ -1,0 +1,4 @@
+services:
+  app:
+    cpus: "${APP_CPUS:-1.0}"
+    mem_limit: "${APP_MEMORY:-2g}"

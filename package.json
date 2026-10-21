@@ -6,6 +6,11 @@
     "node": ">=22"
   },
   "scripts": {
+    "build:preview-worker": "tsc --project tsconfig.preview-worker.json",
+    "predev": "npm run build:preview-worker",
+    "predev:webpack": "npm run build:preview-worker",
+    "prebuild": "npm run build:preview-worker",
+    "prebuild:webpack": "npm run build:preview-worker",
     "dev": "node scripts/with-env.js dev",
     "dev:webpack": "node scripts/with-env.js dev --webpack",
     "build": "next build",

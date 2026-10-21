@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.preview-worker/
 /out/
 
 # production

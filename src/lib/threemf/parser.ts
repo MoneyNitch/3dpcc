@@ -2,10 +2,12 @@ import AdmZip from "adm-zip";
 import { XMLParser } from "fast-xml-parser";
 import { randomUUID } from "node:crypto";
 import { analyzeGcode, parseBucketKey } from "./gcodeAnalyzer";
+import { gcodeGeometrySteps } from "./gcodeGeometry";
 import type {
   CategoryBreakdown,
   FilamentUsage,
   MaterialCategoryBreakdown,
+  ModelGeometry,
   ObjectBreakdown,
   ParsedPlate,
   ParsedPrint,
@@ -135,6 +137,105 @@ function parseSliceInfoConfig(xml: string): SliceInfo {
 }
 
 const CATEGORY_ORDER: PartCategory[] = ["model", "support", "tower", "other"];
+
+type ModelVertex = { x: string; y: string; z: string };
+type ModelTriangle = { v1: string; v2: string; v3: string; pid?: string; p1?: string };
+type ModelObject = {
+  id: string;
+  pid?: string;
+  pindex?: string;
+  displaycolor?: string;
+  mesh?: { vertices?: { vertex: ModelVertex | ModelVertex[] }; triangles?: { triangle: ModelTriangle | ModelTriangle[] } };
+  components?: { component: { objectid: string; transform?: string } | { objectid: string; transform?: string }[] };
+};
+
+const IDENTITY_TRANSFORM = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+
+function parseTransform(value?: string): number[] {
+  if (!value) return IDENTITY_TRANSFORM;
+  const numbers = value.split(/\s+/).map(Number);
+  return numbers.length === 12 && numbers.every(Number.isFinite) ? numbers : IDENTITY_TRANSFORM;
+}
+
+function transformPoint(point: [number, number, number], transforms: number[][]): [number, number, number] {
+  let [x, y, z] = point;
+  for (const transform of transforms) {
+    [x, y, z] = [
+      x * transform[0] + y * transform[3] + z * transform[6] + transform[9],
+      x * transform[1] + y * transform[4] + z * transform[7] + transform[10],
+      x * transform[2] + y * transform[5] + z * transform[8] + transform[11],
+    ];
+  }
+  return [x, y, z];
+}
+
+/** Extracts build meshes from a 3MF archive for the optional interactive preview. */
+export function parse3mfGeometry(buffer: Buffer): ModelGeometry | null {
+  const steps = geometrySteps(buffer);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+export function* geometrySteps(buffer: Buffer): Generator<void, ModelGeometry | null> {
+  const zip = new AdmZip(buffer);
+  function* toolpathFallback(): Generator<void, ModelGeometry | null> {
+    const entry = findEntry(zip, (name) => /plate_\d+\.gcode$/.test(name));
+    return entry ? yield* gcodeGeometrySteps(entry.getData().toString("utf-8")) : null;
+  }
+  const modelEntry = findEntry(zip, (name) => /^3d\/3dmodel\.model$/i.test(name));
+  if (!modelEntry) return yield* toolpathFallback();
+
+  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
+  const model = parser.parse(modelEntry.getData().toString("utf-8"))?.model;
+  const resourceData = model?.resources ?? {};
+  const objects = toArray<ModelObject>(resourceData.object);
+  const objectsById = new Map(objects.map((object) => [object.id, object]));
+  const materials = new Map<string, string>();
+  for (const group of toArray<{ id: string; base: { displaycolor: string } | { displaycolor: string }[] }>(resourceData.basematerials)) {
+    toArray(group.base).forEach((material, index) => materials.set(`${group.id}:${index}`, material.displaycolor));
+  }
+
+  const buildItems = toArray<{ objectid: string; transform?: string }>(model?.build?.item);
+  const roots: { objectid: string; transform?: string }[] =
+    buildItems.length ? buildItems : objects.map((object) => ({ objectid: object.id }));
+  const geometry: ModelGeometry = { positions: [], colors: [] };
+  const maxTriangles = 50_000;
+  let limitReached = false;
+
+  function appendObject(objectId: string, transforms: number[][], stack: Set<string>, depth: number): void {
+    if (depth > 32 || stack.has(objectId)) return;
+    const object = objectsById.get(objectId);
+    if (!object) return;
+    const nextStack = new Set(stack).add(objectId);
+    const mesh = object.mesh;
+    if (mesh) {
+      const vertices = toArray(mesh.vertices?.vertex).map((vertex) => [Number(vertex.x), Number(vertex.y), Number(vertex.z)] as [number, number, number]);
+      const objectColor = object.displaycolor ?? materials.get(`${object.pid}:${object.pindex ?? "0"}`) ?? "#94a3b8";
+      for (const triangle of toArray(mesh.triangles?.triangle)) {
+        if (geometry.colors.length >= maxTriangles) {
+          limitReached = true;
+          break;
+        }
+        const indices = [Number(triangle.v1), Number(triangle.v2), Number(triangle.v3)];
+        if (indices.some((index) => !Number.isInteger(index) || index < 0 || index >= vertices.length)) continue;
+        const trianglePoints = indices.map((index) => vertices[index]);
+        if (trianglePoints.some((point) => !point.every(Number.isFinite))) continue;
+        const triangleColor = triangle.pid && triangle.p1
+          ? materials.get(`${triangle.pid}:${triangle.p1}`) ?? objectColor
+          : objectColor;
+        for (const point of trianglePoints) geometry.positions.push(...transformPoint(point, transforms));
+        geometry.colors.push(triangleColor);
+      }
+    }
+    for (const component of toArray(object.components?.component)) {
+      appendObject(component.objectid, [parseTransform(component.transform), ...transforms], nextStack, depth + 1);
+    }
+  }
+
+  for (const item of roots) appendObject(item.objectid, [parseTransform(item.transform)], new Set(), 0);
+  return geometry.colors.length && !limitReached ? geometry : yield* toolpathFallback();
+}
 
 export async function parse3mf(buffer: Buffer, fileName: string): Promise<ParsedPrint> {
   const zip = new AdmZip(buffer);

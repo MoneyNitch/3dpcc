@@ -19,6 +19,51 @@ tower and total) and multi-color information, and calculates print costs.
 - Cost calculator for material, electricity, machine wear, labor, packaging,
   profit margin and tax
 - Configurable material prices, printer profiles and cost settings
+- Interactive 3D preview: embedded model meshes when available, otherwise a
+  complete G-code toolpath preview (including XY arcs), rendered using WebGL2
+  as solid filament strands with slicer-provided widths and layer heights.
+  No depositing segments are sampled or dropped. Toolpaths are not the original
+  surface model and cannot exactly reproduce the slicer's thumbnail.
+  The first matching G-code plate is displayed; travel and custom machine
+  routines are excluded. Re-upload older prints to replace sampled preview data.
+  Disable **Enable 3D preview** under **Settings > General** to show only 2D
+  images and skip generating 3D data on new uploads. Existing preview data is
+  retained. Prints uploaded while disabled require another upload for 3D after
+  re-enabling the setting.
+
+### Background 3D calculation on slower systems
+
+Uploads save the print and queue its 3D preview instead of calculating it in the
+request. One background worker processes the queue sequentially, without reducing
+toolpath detail. Print costs and the 2D thumbnail remain usable while it runs.
+The 3D tab shows the pending calculation and automatically loads the result.
+Failed jobs show a retry button.
+
+In **Settings > General**, set the **3D background calculation duty cycle**
+(10–100%, default 25%). Lower values insert longer pauses between toolpath
+processing and serialization steps. Changes apply to the active worker within
+about two seconds. Disabling 3D pauses active and queued calculations and skips
+queuing new uploads; enabling it again resumes existing jobs.
+
+This is **not an exact CPU-percentage or RAM limit**. ZIP decompression, XML/mesh
+processing, compression and the normal upload/cost analysis are not strictly
+throttled. Full previews can consume substantial server and browser memory.
+The browser's rendering load is not controlled by the server setting.
+
+Jobs and original archives are stored locally in `data/preview-jobs/`, including
+when using PostgreSQL or MySQL. Keep this directory on persistent storage and
+writable by the app user. After a server restart, interrupted jobs start again
+from the beginning (not from a saved intermediate position). Successful jobs
+store the compressed preview in the configured database and remove the original
+archive. Failed jobs retain the archive for retry; deleting the print cancels
+its job and removes its queue files. Back up and protect the entire `data/`
+directory, since it temporarily contains original uploads. Use one app instance
+per data directory; the queue is not a distributed, multi-replica service.
+
+`npm run build`, `npm run build:webpack`, and the development commands compile
+the worker automatically into `.preview-worker/`. When deploying outside Docker,
+deploy this directory alongside the built app and its Node dependencies; do not
+run `next build` directly instead of the npm build command.
 
 ## Roadmap
 
@@ -133,6 +178,31 @@ Without Compose, plain Docker also works:
 docker build -t 3d-pcc .
 docker run -d -p 3000:3000 -v ./data:/app/data --name 3d-pcc 3d-pcc
 ```
+
+#### Optional hard CPU and memory limits
+
+Use the additional Compose file to cap the **entire running app container**,
+including its background worker:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.limits.yml up -d --build
+```
+
+Defaults are **one CPU** and **2 GiB RAM**. Override `APP_CPUS` and `APP_MEMORY`
+in the Compose `.env` file (not `.env.local`), for example:
+
+```dotenv
+APP_CPUS=0.5
+APP_MEMORY=2g
+```
+
+The CPU quota is measured in CPU cores (0.5 = half of one core), not a percentage
+of the whole machine. These limits do not constrain the image build or the
+browser. The memory limit does not make a complete preview smaller: insufficient
+RAM may cause worker failure or the container to be OOM-killed. Increase the
+limit, or disable 3D previews, if that happens. Interrupted jobs remain on disk
+and are attempted again after restart. Use `docker stats 3d-pcc` to monitor load
+and `docker inspect 3d-pcc` to inspect applied limits.
 
 On Linux hosts, the container runs as a non-root user (uid 1001); if `./data`
 already exists and is owned by root (e.g. created via `sudo docker compose

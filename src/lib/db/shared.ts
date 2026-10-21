@@ -9,6 +9,8 @@ export interface DataStore {
   savePrint(print: ParsedPrint): Promise<void>;
   listPrints(): Promise<ParsedPrint[]>;
   getPrint(id: string): Promise<ParsedPrint | null>;
+  savePrintModel(id: string, model: Buffer): Promise<void>;
+  getPrintModel(id: string): Promise<Buffer | null>;
   updatePrintName(id: string, displayName: string): Promise<void>;
   deletePrint(id: string): Promise<void>;
   getPrintCostInputs(id: string): Promise<PrintCostInputs | null>;
@@ -77,6 +79,8 @@ export const defaultSettings: AppSettings = {
   general: {
     language: "de",
     currency: "EUR",
+    enable3dPreview: true,
+    previewComputePercent: 25,
   },
   numbering: {
     invoice: { prefix: "R", nextNumber: 1, digits: 4 },
@@ -99,6 +103,12 @@ export function migrateSettings(raw: unknown): AppSettings {
   }
   if (!result.general) {
     result = { ...result, general: defaultSettings.general };
+  }
+  if (result.general.enable3dPreview === undefined) {
+    result = { ...result, general: { ...result.general, enable3dPreview: defaultSettings.general.enable3dPreview } };
+  }
+  if (result.general.previewComputePercent === undefined) {
+    result = { ...result, general: { ...result.general, previewComputePercent: defaultSettings.general.previewComputePercent } };
   }
   if (!result.accessoryMaterials) {
     result = { ...result, accessoryMaterials: [] };
@@ -164,4 +174,3 @@ function migrateInvoiceTemplate(raw: unknown): InvoiceTemplate {
     customValues: template.customValues,
   };
 }
-

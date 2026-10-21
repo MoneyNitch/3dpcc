@@ -32,6 +32,10 @@ function openDb(): Database.Database {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       data TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS print_models (
+      id TEXT PRIMARY KEY,
+      data BLOB NOT NULL
+    );
   `);
   return db;
 }
@@ -88,6 +92,17 @@ export function createSqliteStore(): DataStore {
     return row ? (JSON.parse(row.data) as ParsedPrint) : null;
   }
 
+  async function savePrintModel(id: string, model: Buffer): Promise<void> {
+    db.prepare("INSERT INTO print_models (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data").run(id, model);
+  }
+
+  async function getPrintModel(id: string): Promise<Buffer | null> {
+    const row = db.prepare("SELECT data FROM print_models WHERE id = ?").get(id) as
+      | { data: Buffer }
+      | undefined;
+    return row?.data ?? null;
+  }
+
   async function updatePrintName(id: string, displayName: string): Promise<void> {
     const print = await getPrint(id);
     if (!print) throw new Error("Druck nicht gefunden.");
@@ -100,6 +115,7 @@ export function createSqliteStore(): DataStore {
 
   async function deletePrint(id: string): Promise<void> {
     db.prepare("DELETE FROM prints WHERE id = ?").run(id);
+    db.prepare("DELETE FROM print_models WHERE id = ?").run(id);
   }
 
   async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -123,6 +139,8 @@ export function createSqliteStore(): DataStore {
     savePrint,
     listPrints,
     getPrint,
+    savePrintModel,
+    getPrintModel,
     updatePrintName,
     deletePrint,
     getPrintCostInputs,

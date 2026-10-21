@@ -18,6 +18,12 @@ async function ensureSchema(pool: mysql.Pool): Promise<void> {
       data LONGTEXT NOT NULL
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS print_models (
+      id VARCHAR(64) PRIMARY KEY,
+      data LONGBLOB NOT NULL
+    )
+  `);
 }
 
 /** MySQL / MariaDB backend. Pass an explicit connection string, or omit to read DATABASE_URL. */
@@ -85,9 +91,24 @@ export function createMysqlStore(connectionString?: string): DataStore {
     return rows[0] ? (JSON.parse(rows[0].data) as ParsedPrint) : null;
   }
 
+  async function savePrintModel(id: string, model: Buffer): Promise<void> {
+    await ready;
+    await pool.query(
+      "INSERT INTO print_models (id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
+      [id, model]
+    );
+  }
+
+  async function getPrintModel(id: string): Promise<Buffer | null> {
+    await ready;
+    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT data FROM print_models WHERE id = ?", [id]);
+    return (rows[0]?.data as Buffer | undefined) ?? null;
+  }
+
   async function deletePrint(id: string): Promise<void> {
     await ready;
     await pool.query("DELETE FROM prints WHERE id = ?", [id]);
+    await pool.query("DELETE FROM print_models WHERE id = ?", [id]);
   }
 
   async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -125,6 +146,8 @@ export function createMysqlStore(connectionString?: string): DataStore {
     savePrint,
     listPrints,
     getPrint,
+    savePrintModel,
+    getPrintModel,
     updatePrintName,
     deletePrint,
     getPrintCostInputs,

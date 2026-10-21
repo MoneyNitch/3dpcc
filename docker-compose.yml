@@ -16,5 +16,5 @@ services:
       - DB_DRIVER=${DB_DRIVER:-sqlite}
       - DATABASE_URL=${DATABASE_URL:-}
     volumes:
-      # Persists the SQLite DB, db-config.json and the encryption key across restarts.
+      # Persists SQLite, DB config/key and queued original uploads across restarts.
       - ./data:/app/data

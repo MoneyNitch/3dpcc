@@ -9,6 +9,7 @@ import { InvoiceExport } from "@/components/InvoiceExport";
 import { DeletePrintButton } from "@/components/DeletePrintButton";
 import { PrintNameEditor } from "@/components/PrintNameEditor";
 import { PrintDataEditor } from "@/components/PrintDataEditor";
+import { ModelPreview } from "@/components/ModelPreview";
 import { categoryLabel, formatDuration, formatGrams } from "@/lib/format";
 import { translate } from "@/lib/i18n";
 
@@ -51,11 +52,14 @@ export default async function PrintDetailPage({
       <CostInputsProvider printId={print.id} initialInputs={costInputs}>
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
           <div className="flex flex-col gap-6">
-          {plate.thumbnailBase64 && (
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={plate.thumbnailBase64} alt={print.fileName} className="mx-auto max-h-80" />
-            </div>
+          {(plate.thumbnailBase64 || (!print.manual && settings.general.enable3dPreview)) && (
+            <ModelPreview
+              key={print.id}
+              printId={print.id}
+              thumbnail={plate.thumbnailBase64}
+              alt={print.fileName}
+              allow3d={!print.manual && settings.general.enable3dPreview}
+            />
           )}
 
           <div className={`grid gap-3 text-center ${print.manual ? "grid-cols-2" : "grid-cols-3"}`}>

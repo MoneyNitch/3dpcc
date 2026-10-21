@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { insertPrint, listPrints } from "@/lib/db";
+import { deletePrint, getSettings, insertPrint, listPrints } from "@/lib/db";
 import { parse3mf } from "@/lib/threemf/parser";
+import { getPreviewQueue } from "@/lib/previewQueue";
 import type { ParsedPrint } from "@/lib/types";
 import { readPrintImage } from "@/lib/printImage";
 import { parseManualFilaments, parseManualCategories, manualBreakdown } from "@/lib/manualPrint";
@@ -67,7 +68,19 @@ export async function POST(req: NextRequest) {
     const parsed = await parse3mf(buffer, file.name);
     const displayName = String(formData.get("displayName") ?? "").trim();
     if (displayName) parsed.displayName = displayName.slice(0, 200);
+    const settings = await getSettings();
     await insertPrint(parsed);
+    try {
+      if (settings.general.enable3dPreview) {
+        const queue = await getPreviewQueue();
+        await queue.enqueue(parsed.id, buffer);
+        queue.start();
+      }
+    } catch (error) {
+      await (await getPreviewQueue()).cancel(parsed.id);
+      await deletePrint(parsed.id);
+      throw error;
+    }
     return NextResponse.json({ print: parsed }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unbekannter Fehler beim Verarbeiten der Datei.";

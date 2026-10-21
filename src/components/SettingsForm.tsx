@@ -207,6 +207,9 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
         className={`${activeTab === "general" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
       >
         <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("settings.general")}</h2>
+        <p className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-300">
+          {t("settings.version")}: {packageJson.version}
+        </p>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <Field label={t("settings.language")}>
             <select
@@ -229,9 +232,6 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
             </select>
           </Field>
         </div>
-        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
-          {t("settings.version")}: {packageJson.version}
-        </p>
       </section>
 
       <section

@@ -188,13 +188,19 @@ including its background worker:
 docker compose -f docker-compose.yml -f docker-compose.limits.yml up -d --build
 ```
 
-Defaults are **one CPU** and **2 GiB RAM**. Override `APP_CPUS` and `APP_MEMORY`
-in the Compose `.env` file (not `.env.local`), for example:
+By default, **no CPU or RAM limit is applied**, even with the additional file.
+Set `APP_CPUS` and/or `APP_MEMORY` in the Compose `.env` file beside the Compose
+files (not `.env.local`) to enable only the limits you want, for example:
 
 ```dotenv
 APP_CPUS=0.5
 APP_MEMORY=2g
 ```
+
+Missing, empty, or `0` values leave the corresponding resource unlimited.
+Setting only `APP_CPUS` leaves RAM unlimited, and vice versa. Re-run the Compose
+command above after changing these values to recreate the container as needed.
+Without the additional limits file, these variables have no effect.
 
 The CPU quota is measured in CPU cores (0.5 = half of one core), not a percentage
 of the whole machine. These limits do not constrain the image build or the

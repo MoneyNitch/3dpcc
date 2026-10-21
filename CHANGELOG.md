@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.5.0 — Interactive 3D previews and background processing
+
+### Added
+- **Interactive 3D preview** on print details, with 2D/3D switching, rotation,
+  zoom and a reset-view button.
+- **G-code toolpath fallback** for sliced archives without usable embedded
+  model meshes. All depositing segments are retained, including subdivided
+  clockwise and counterclockwise XY arcs, without sampling or thinning.
+- **GPU-rendered filament strands** using WebGL2, with filament colors and
+  slicer-provided extrusion widths and layer heights.
+- **Persistent background queue** for preview generation: one worker processes
+  uploads sequentially while print costs and the 2D thumbnail remain usable.
+  Pending previews update automatically; failed calculations offer a retry.
+- **3D controls in Settings → General**: enable or disable previews and adjust
+  the background calculation duty cycle from 10–100% (default 25%). Lower
+  values insert work pauses without reducing preview detail.
+- **Optional Docker resource limits** through `docker-compose.limits.yml`.
+  Set `APP_CPUS` and/or `APP_MEMORY` in the Compose `.env` file to limit the
+  entire app container. Missing, empty or `0` values leave the corresponding
+  resource unlimited; no CPU or RAM cap is applied by default.
+- **App version display** in the general settings.
+
+### Changed
+- Preview generation now runs outside the upload request in a separate worker.
+  Disabling 3D pauses existing jobs and skips preview generation for new uploads.
+- Interrupted jobs restart from the original upload after a server restart.
+  Queued and failed jobs retain their archives in `data/preview-jobs/`;
+  successful calculations and deleted prints remove their queue files.
+- Compressed previews are stored separately from print records in SQLite,
+  PostgreSQL and MySQL/MariaDB, transferred during database migration, and
+  served as gzip-compressed responses.
+- Development and production npm build commands compile the preview worker
+  automatically; Docker includes the worker and its runtime dependencies.
+- Settings save failures now display an error instead of reporting success.
+
+### Fixed
+- TypeScript production-build errors involving nullable canvas references and
+  optional 3MF build-item transforms.
+- Blank previews after switching back from 2D to an already loaded 3D view.
+- Mouse-wheel zoom attempting to prevent scrolling from a passive listener.
+- Temporary Windows file locks preventing background job status updates.
+
+### Notes
+- Toolpath previews are not the original surface model and do not exactly
+  reproduce the slicer's 2D thumbnail. Travel moves and custom machine routines
+  are excluded; the first matching G-code plate is displayed.
+- The duty-cycle setting is not a hard CPU or RAM limit and does not control
+  browser rendering. Full previews can require substantial memory.
+- Re-upload older prints to generate missing or replace previously sampled
+  preview data. The queue requires persistent, writable `data/` storage and
+  supports one app instance per data directory.
+
 ## v0.4.0 — Manual prints and QR code sizing
 
 ### Added

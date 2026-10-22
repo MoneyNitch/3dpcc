@@ -14,8 +14,9 @@ import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol } from "@/lib/i18n";
 import packageJson from "../../package.json";
+import { PreviewQueueSettings } from "./PreviewQueueSettings";
 
-type SettingsTab = "general" | "materials" | "accessories" | "printers" | "numbering" | "costs";
+type SettingsTab = "general" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
 
 export function SettingsForm({ initialSettings }: { initialSettings: AppSettings }) {
   const router = useRouter();
@@ -36,6 +37,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
     parseFloat(lang === "de" ? value.replace(",", ".") : value) || 0;
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "queue", label: t("queue.title") },
     { id: "materials", label: t("settings.materials") },
     { id: "accessories", label: t("settings.accessoryMaterials") },
     { id: "printers", label: t("settings.printers") },
@@ -621,7 +623,9 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
         </div>
       </section>
 
+      {activeTab === "queue" && <PreviewQueueSettings />}
       <button
+        hidden={activeTab === "queue"}
         onClick={save}
         className="self-start rounded-lg bg-orange-500 px-5 py-2.5 font-medium text-white hover:bg-orange-600"
       >

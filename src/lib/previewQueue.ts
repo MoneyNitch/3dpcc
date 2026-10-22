@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promise
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { AppSettings } from "./types";
+import type { AppSettings, PreviewQueueEntry } from "./types";
 import type { PreviewWorkerInput } from "./previewWorker";
 
 type JobStatus = "queued" | "running" | "error" | "unavailable";
@@ -33,6 +33,13 @@ export class PreviewQueue {
   private timer?: ReturnType<typeof setInterval>;
   private pending?: Promise<void>;
   private stopped = false;
+  private lock: Promise<unknown> = Promise.resolve();
+
+  private exclusive<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.lock.then(action);
+    this.lock = result.then(() => {}, () => {});
+    return result;
+  }
 
   constructor(private readonly dependencies: QueueDependencies) {}
 
@@ -43,7 +50,11 @@ export class PreviewQueue {
 
   private async saveJob(id: string, job: PreviewJob) {
     const file = path.join(this.directory(id), "job.json");
-    await writeFile(file + ".tmp", JSON.stringify(job));
+    await this.atomicWrite(file, JSON.stringify(job));
+  }
+
+  private async atomicWrite(file: string, data: string) {
+    await writeFile(file + ".tmp", data);
     for (let attempt = 0; ; attempt++) {
       try {
         await rename(file + ".tmp", file);
@@ -76,24 +87,75 @@ export class PreviewQueue {
   }
 
   async enqueue(id: string, source: Buffer) {
-    await mkdir(this.directory(id), { recursive: true });
-    await writeFile(path.join(this.directory(id), "source.3mf"), source);
-    await this.saveJob(id, { status: "queued", createdAt: new Date().toISOString() });
+    return this.exclusive(async () => {
+      await mkdir(this.directory(id), { recursive: true });
+      await writeFile(path.join(this.directory(id), "source.3mf"), source);
+      await this.saveJob(id, { status: "queued", createdAt: new Date().toISOString() });
+    });
   }
 
   async retry(id: string) {
-    if (await this.status(id) !== "error") throw new Error("Only failed preview jobs can be retried.");
-    await this.saveJob(id, { status: "queued", createdAt: new Date().toISOString() });
+    return this.exclusive(async () => {
+      if (await this.status(id) !== "error") throw new Error("Only failed preview jobs can be retried.");
+      await this.saveJob(id, { status: "queued", createdAt: new Date().toISOString() });
+    });
   }
 
   async cancel(id: string) {
+    return this.exclusive(() => this.cancelJob(id));
+  }
+
+  private async cancelJob(id: string) {
     if (this.active?.id === id) {
       const active = this.active;
       this.active = undefined;
       await active.worker.terminate();
-      await this.pending;
     }
     await rm(this.directory(id), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+
+  private async entries(): Promise<PreviewQueueEntry[]> {
+    await mkdir(this.dependencies.directory, { recursive: true });
+    const jobs: PreviewQueueEntry[] = [];
+    for (const entry of await readdir(this.dependencies.directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const job = await this.readJob(entry.name);
+      if (job) jobs.push({
+        id: entry.name, ...job,
+        status: job.status === "running" && this.active?.id !== entry.name ? "queued" : job.status,
+      });
+    }
+    let order: unknown;
+    try {
+      order = JSON.parse(await readFile(path.join(this.dependencies.directory, "order.json"), "utf8"));
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+      order = [];
+    }
+    if (!Array.isArray(order) || !order.every((id): id is string => typeof id === "string")) {
+      throw new Error("Invalid preview queue order.");
+    }
+    const rank = new Map(order.map((id, index) => [id, index]));
+    const group = (job: PreviewQueueEntry) => job.status === "running" ? 0 : job.status === "queued" ? 1 : 2;
+    return jobs.sort((a, b) => group(a) - group(b) ||
+      (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) ||
+      a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  }
+
+  async list(): Promise<PreviewQueueEntry[]> {
+    return this.exclusive(() => this.entries());
+  }
+
+  async move(id: string, direction: "up" | "down"): Promise<boolean> {
+    return this.exclusive(async () => {
+      const waiting = (await this.entries()).filter((job) => job.status === "queued");
+      const index = waiting.findIndex((job) => job.id === id);
+      const target = index + (direction === "up" ? -1 : 1);
+      if (index < 0 || target < 0 || target >= waiting.length) return false;
+      [waiting[index], waiting[target]] = [waiting[target], waiting[index]];
+      await this.atomicWrite(path.join(this.dependencies.directory, "order.json"), JSON.stringify(waiting.map((job) => job.id)));
+      return true;
+    });
   }
 
   start() {
@@ -119,6 +181,10 @@ export class PreviewQueue {
   }
 
   async tick() {
+    return this.exclusive(() => this.tickLocked());
+  }
+
+  private async tickLocked() {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
     try {
@@ -131,18 +197,10 @@ export class PreviewQueue {
         return;
       }
       if (!duty) return;
-      await mkdir(this.dependencies.directory, { recursive: true });
-      const candidates: { id: string; createdAt: string }[] = [];
-      for (const entry of await readdir(this.dependencies.directory, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const job = await this.readJob(entry.name);
-        if (!job || (job.status !== "queued" && job.status !== "running")) continue;
-        candidates.push({ id: entry.name, createdAt: job.createdAt });
-      }
-      candidates.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      const candidates = (await this.entries()).filter((job) => job.status === "queued");
       for (const job of candidates) {
         if (!await this.dependencies.printExists(job.id)) {
-          await this.cancel(job.id);
+          await this.cancelJob(job.id);
           continue;
         }
         await this.saveJob(job.id, { status: "running", createdAt: job.createdAt });
@@ -194,24 +252,30 @@ export class PreviewQueue {
           else resolve(result);
         });
       });
-      if (this.active?.worker !== worker) return;
-      if (!await this.dependencies.printExists(id)) {
-        await rm(this.directory(id), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-      } else if (available) {
-        await this.dependencies.saveModel(id, await readFile(path.join(this.directory(id), "result.gz")));
-        await rm(this.directory(id), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-      } else {
-        await this.saveJob(id, { status: "unavailable", createdAt });
-        await rm(path.join(this.directory(id), "source.3mf"), { force: true });
-      }
+      await this.exclusive(async () => {
+        if (this.active?.worker !== worker) return;
+        if (!await this.dependencies.printExists(id)) {
+          await rm(this.directory(id), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        } else if (available) {
+          await this.dependencies.saveModel(id, await readFile(path.join(this.directory(id), "result.gz")));
+          await rm(this.directory(id), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        } else {
+          await this.saveJob(id, { status: "unavailable", createdAt });
+          await rm(path.join(this.directory(id), "source.3mf"), { force: true });
+        }
+        this.active = undefined;
+      });
     } catch (error) {
-      if (this.active?.worker !== worker) return;
-      console.error(`Preview job ${id} failed:`, error);
-      try {
-        await this.saveJob(id, { status: "error", createdAt });
-      } catch (stateError) {
-        console.error(`Could not persist preview failure for ${id}:`, stateError);
-      }
+      await this.exclusive(async () => {
+        if (this.active?.worker !== worker) return;
+        console.error(`Preview job ${id} failed:`, error);
+        try {
+          await this.saveJob(id, { status: "error", createdAt });
+        } catch (stateError) {
+          console.error(`Could not persist preview failure for ${id}:`, stateError);
+        }
+        this.active = undefined;
+      });
     } finally {
       if (this.active?.worker === worker) this.active = undefined;
     }

@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.5.1 — Preview queue management
+
+### Added
+- **Queue tab in Settings** showing waiting, processing, failed and unsupported
+  3D preview jobs, with print names and links to their detail pages.
+- **Automatic refresh**, a manual refresh button, and a pause indicator when
+  3D previews are disabled.
+- **Persistent job ordering**: move waiting jobs up or down to change their
+  execution order, including across server restarts. The active calculation
+  cannot be reordered.
+- **Remove or cancel preview jobs**, including active calculations, with a
+  confirmation before deleting their temporary files.
+- German and English translations for queue management, including loading,
+  empty and error states.
+
+### Changed
+- Queue actions take effect immediately without saving general settings.
+- Queue scheduling, ordering, cancellation and result persistence are serialized
+  to prevent conflicting changes during background processing.
+
+### Fixed
+- Race conditions between cancellation and automatic scheduling that could
+  otherwise start work after its job had been removed.
+
+### Notes
+- Removing or cancelling a preview job does **not** delete the saved print or
+  its cost data. To calculate the removed preview again, upload the file again.
+
 ## v0.5.0 — Interactive 3D previews and background processing
 
 ### Added

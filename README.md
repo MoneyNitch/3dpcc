@@ -38,6 +38,12 @@ request. One background worker processes the queue sequentially, without reducin
 toolpath detail. Print costs and the 2D thumbnail remain usable while it runs.
 The 3D tab shows the pending calculation and automatically loads the result.
 Failed jobs show a retry button.
+**Settings > Queue** lists waiting, processing, failed and unsupported jobs and
+refreshes automatically. Move waiting jobs up or down to change their persistent
+execution order; the active job cannot be reordered. Removing a job or cancelling
+an active calculation deletes only its temporary preview files, never the print.
+A confirmation is required; another upload is needed to calculate that preview
+again. Queue changes take effect immediately without saving general settings.
 
 In **Settings > General**, set the **3D background calculation duty cycle**
 (10–100%, default 25%). Lower values insert longer pauses between toolpath

@@ -176,6 +176,60 @@ test("retains failed jobs for explicit retry and deletes unsupported sources", a
   }
 });
 
+test("lists and persists reordered waiting jobs across restarts and schedules that order", async () => {
+  const f = await fixture();
+  let restarted: PreviewQueue | undefined;
+  try {
+    const ids = [randomUUID(), randomUUID(), randomUUID()];
+    for (let i = 0; i < ids.length; i++) {
+      f.prints.add(ids[i]);
+      await f.queue.enqueue(ids[i], archive());
+      await writeFile(path.join(f.directory, ids[i], "job.json"), JSON.stringify({
+        status: "queued", createdAt: new Date(1000 + i).toISOString(),
+      }));
+    }
+    assert.deepEqual((await f.queue.list()).map((job) => job.id), ids);
+    assert.equal(await f.queue.move(ids[0], "up"), false);
+    assert.equal(await f.queue.move(ids[2], "up"), true);
+    assert.equal(await f.queue.move(ids[2], "up"), true);
+    assert.deepEqual((await f.queue.list()).map((job) => job.id), [ids[2], ids[0], ids[1]]);
+    await f.queue.stop();
+    restarted = new PreviewQueue(f.dependencies);
+    assert.deepEqual((await restarted.list()).map((job) => job.id), [ids[2], ids[0], ids[1]]);
+    await restarted.tick();
+    assert.equal(await restarted.status(ids[2]), "running");
+    assert.equal(await restarted.move(ids[2], "down"), false);
+    await eventually(async () => f.saved.has(ids[2]));
+    await eventually(async () => await restarted!.status(ids[2]) === null);
+    await restarted.cancel(ids[0]);
+    assert.ok(f.prints.has(ids[0]));
+    assert.equal(await restarted.status(ids[0]), null);
+    await restarted.tick();
+    await eventually(async () => f.saved.has(ids[1]));
+  } finally {
+    await f.queue.stop();
+    await restarted?.stop();
+    await rm(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("serializes cancellation with scheduling so cancelled work cannot restart", async () => {
+  const f = await fixture();
+  const id = randomUUID();
+  try {
+    f.prints.add(id);
+    await f.queue.enqueue(id, archive(10_000));
+    await Promise.all([f.queue.tick(), f.queue.cancel(id), f.queue.tick()]);
+    assert.equal(await f.queue.status(id), null);
+    assert.equal(f.saved.size, 0);
+    assert.equal(await f.queue.move(id, "down"), false);
+    assert.ok(f.prints.has(id));
+  } finally {
+    await f.queue.stop();
+    await rm(f.directory, { recursive: true, force: true });
+  }
+});
+
 test("throttling increases work time without dropping segments", async () => {
   const times: number[] = [];
   const source = archive(50_000);

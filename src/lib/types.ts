@@ -182,6 +182,12 @@ export type Language = "de" | "en";
 export type Currency = "EUR" | "USD";
 export type Theme = "light" | "dark";
 
+export interface PreviewQueueEntry {
+  id: string;
+  status: "queued" | "running" | "error" | "unavailable";
+  createdAt: string;
+}
+
 export interface GeneralSettings {
   language: Language;
   currency: Currency;

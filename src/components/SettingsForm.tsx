@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   AccessoryMaterial,
   AppSettings,
@@ -13,12 +13,17 @@ import type {
 import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol } from "@/lib/i18n";
+import { getCurrencyOptions } from "@/lib/currency";
 import packageJson from "../../package.json";
 import { PreviewQueueSettings } from "./PreviewQueueSettings";
 
-type SettingsTab = "general" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
+type SettingsTab = "general" | "database" | "filaments" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
 
-export function SettingsForm({ initialSettings }: { initialSettings: AppSettings }) {
+export function SettingsForm({ initialSettings, databaseSettings, filamentSettings }: {
+  initialSettings: AppSettings;
+  databaseSettings: ReactNode;
+  filamentSettings: ReactNode;
+}) {
   const router = useRouter();
   const { t, setLocale, lang } = useLocale();
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
@@ -27,7 +32,8 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
   const [printerSaved, setPrinterSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
-  const unit = currencySymbol(settings.general.currency);
+  const unit = currencySymbol(settings.general.currency, lang);
+  const currencies = getCurrencyOptions(lang);
   const formatDecimal = (value: number, maximumFractionDigits = 3) =>
     new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
       useGrouping: false,
@@ -37,6 +43,8 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
     parseFloat(lang === "de" ? value.replace(",", ".") : value) || 0;
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "database", label: t("db.title") },
+    { id: "filaments", label: t("filamentDb.title") },
     { id: "queue", label: t("queue.title") },
     { id: "materials", label: t("settings.materials") },
     { id: "accessories", label: t("settings.accessoryMaterials") },
@@ -193,16 +201,17 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
   return (
     <div className="flex flex-col gap-6">
       {saveError && <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{t("settings.saveFailed")}</p>}
-      <div role="tablist" aria-label={t("settings.title")} className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-700">
+      <div role="tablist" aria-label={t("settings.title")} className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700">
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            id={`${tab.id}-settings-tab`}
             type="button"
             role="tab"
             aria-selected={activeTab === tab.id}
             aria-controls={`${tab.id}-settings-panel`}
             onClick={() => setActiveTab(tab.id)}
-            className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${
+            className={`max-w-full border-b-2 px-3 py-2 text-sm font-medium ${
               activeTab === tab.id
                 ? "border-orange-500 text-orange-600 dark:text-orange-400"
                 : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
@@ -211,6 +220,24 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
             {tab.label}
           </button>
         ))}
+      </div>
+
+      <div
+        id="database-settings-panel"
+        role="tabpanel"
+        aria-labelledby="database-settings-tab"
+        hidden={activeTab !== "database"}
+      >
+        {databaseSettings}
+      </div>
+
+      <div
+        id="filaments-settings-panel"
+        role="tabpanel"
+        aria-labelledby="filaments-settings-tab"
+        hidden={activeTab !== "filaments"}
+      >
+        {filamentSettings}
       </div>
 
       <section
@@ -239,8 +266,11 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
               onChange={(e) => updateGeneral({ currency: e.target.value as Currency })}
               className={`w-full ${textInputClass}`}
             >
-              <option value="EUR">Euro (€)</option>
-              <option value="USD">US-Dollar ($)</option>
+              {currencies.map(({ code, name }) => (
+                <option key={code} value={code}>
+                  {name} ({code})
+                </option>
+              ))}
             </select>
           </Field>
         </div>
@@ -625,7 +655,7 @@ export function SettingsForm({ initialSettings }: { initialSettings: AppSettings
 
       {activeTab === "queue" && <PreviewQueueSettings />}
       <button
-        hidden={activeTab === "queue"}
+        hidden={activeTab === "queue" || activeTab === "database" || activeTab === "filaments"}
         onClick={save}
         className="self-start rounded-lg bg-orange-500 px-5 py-2.5 font-medium text-white hover:bg-orange-600"
       >

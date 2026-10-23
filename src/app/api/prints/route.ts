@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Keine Datei hochgeladen." }, { status: 400 });
   }
   if (!file.name.toLowerCase().endsWith(".3mf")) {
-    return NextResponse.json({ error: "Bitte eine .gcode.3mf Datei hochladen." }, { status: 400 });
+    return NextResponse.json({ error: "Bitte eine unterstützte .3MF-Datei hochladen." }, { status: 400 });
   }
 
   try {

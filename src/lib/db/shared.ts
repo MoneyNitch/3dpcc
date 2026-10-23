@@ -1,5 +1,6 @@
 import type { AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, ParsedPrint, PrintCostInputs } from "../types";
 import { randomUUID } from "../clientId";
+import { isCurrencyCode } from "../currency";
 
 /** Storage backend contract implemented by each supported database driver. */
 export interface DataStore {
@@ -109,6 +110,9 @@ export function migrateSettings(raw: unknown): AppSettings {
   }
   if (result.general.previewComputePercent === undefined) {
     result = { ...result, general: { ...result.general, previewComputePercent: defaultSettings.general.previewComputePercent } };
+  }
+  if (!isCurrencyCode(result.general.currency)) {
+    result = { ...result, general: { ...result.general, currency: defaultSettings.general.currency } };
   }
   if (!result.accessoryMaterials) {
     result = { ...result, accessoryMaterials: [] };

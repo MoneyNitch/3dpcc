@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ModelGeometry } from "@/lib/types";
 import { useLocale } from "@/lib/locale";
 import { createToolpathRenderer } from "@/lib/toolpathRenderer";
+import { getToolpathLayerHeights } from "@/lib/toolpathLayers";
 
 type PreviewMode = "2d" | "3d";
 type ModelStatus = "idle" | "computing" | "buildError" | "ready" | "unavailable" | "error";
@@ -41,11 +42,20 @@ export function ModelPreview({
   const mode = allow3d ? requestedMode : "2d";
   const [status, setStatus] = useState<ModelStatus>("idle");
   const [geometry, setGeometry] = useState<ModelGeometry | null>(null);
+  const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [retryVersion, setRetryVersion] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawRef = useRef<() => void>(() => {});
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const cameraRef = useRef({ pitch: -0.48, yaw: 0.62, zoom: 1 });
+  const layerHeights = useMemo(
+    () => geometry?.kind === "toolpath" ? getToolpathLayerHeights(geometry) : [],
+    [geometry]
+  );
+  const visibleLayerIndex = selectedLayer ?? layerHeights.length - 1;
+  const visibleLayerHeight = layerHeights[visibleLayerIndex];
+  const layerHeightRef = useRef<number | undefined>(visibleLayerHeight);
+  layerHeightRef.current = visibleLayerHeight;
 
   useEffect(() => {
     if (mode !== "3d" || geometry) return;
@@ -124,7 +134,7 @@ export function ModelPreview({
         frame = 0;
         try {
           renderer ??= createToolpathRenderer(canvas, geometry);
-          renderer.draw(cameraRef.current);
+          renderer.draw(cameraRef.current, layerHeightRef.current);
         } catch (error) {
           failed = true;
           console.error("Failed to render complete toolpath preview:", error);
@@ -150,6 +160,10 @@ export function ModelPreview({
       drawRef.current = () => {};
     };
   }, [geometry, mode, status]);
+
+  useEffect(() => {
+    drawRef.current();
+  }, [visibleLayerHeight]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -318,7 +332,33 @@ export function ModelPreview({
       )}
 
       {mode === "3d" && status === "ready" && geometry?.kind === "toolpath" && (
-        <p className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{t("print.toolpathPreviewNote")}</p>
+        <div className="space-y-2 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+          <p>{t("print.toolpathPreviewNote")}</p>
+          {layerHeights.length > 1 && (
+            <label className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="shrink-0">
+                {t("print.layerSliderLabel", {
+                  current: visibleLayerIndex + 1,
+                  total: layerHeights.length,
+                  height: layerHeights[visibleLayerIndex].toFixed(2),
+                })}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={layerHeights.length - 1}
+                step={1}
+                value={visibleLayerIndex}
+                aria-label={t("print.layerSliderAria")}
+                onChange={(event) => {
+                  setSelectedLayer(Number(event.target.value));
+                  drawRef.current();
+                }}
+                className="min-w-32 flex-1 accent-orange-500"
+              />
+            </label>
+          )}
+        </div>
       )}
       {mode === "2d" && thumbnail ? (
         <div className="flex min-h-72 items-center justify-center bg-white p-3 dark:bg-slate-800">

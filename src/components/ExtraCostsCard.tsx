@@ -9,7 +9,7 @@ import type { AccessoryMaterial } from "@/lib/types";
 import { Modal } from "./Modal";
 
 export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: AccessoryMaterial[] }) {
-  const { inputs, update, save, saved } = useCostInputs();
+  const { inputs, update, save, saved, saveError } = useCostInputs();
   const { t, money, currency, lang } = useLocale();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [name, setName] = useState("");
@@ -121,6 +121,7 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
       >
         {saved ? t("extra.saved") : t("extra.save")}
       </button>
+      {saveError && <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">{t("cost.saveError")}</p>}
 
       {isModalOpen && (
         <Modal title={t("extra.modalTitle")} onClose={() => setIsModalOpen(false)}>
@@ -154,7 +155,7 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                {t("extra.costPerUnit")} ({currencySymbol(currency)})
+                {t("extra.costPerUnit")} ({currencySymbol(currency, lang)})
                 <input
                   type="text"
                   inputMode="decimal"

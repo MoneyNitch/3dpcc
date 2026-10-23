@@ -47,11 +47,22 @@ export function defaultCostInputs(settings: AppSettings): PrintCostInputs {
     marginPercent: settings.costs.marginPercent,
     vatPercent: settings.costs.vatPercent,
     materialPriceOverrides: {},
+    externalSpools: {},
     quantity: 1,
     energyKwhOverride: null,
     extraCosts: [],
     printerId: null,
   };
+}
+
+export function findFilamentPrice(
+  filament: FilamentUsage,
+  settings: AppSettings,
+  inputs: PrintCostInputs
+): number {
+  return inputs.materialPriceOverrides[filament.filamentId] ??
+    inputs.externalSpools?.[filament.filamentId]?.pricePerKg ??
+    findMaterialPriceForFilament(filament, settings);
 }
 
 export function calculateCost(
@@ -62,14 +73,12 @@ export function calculateCost(
   const printHours = plate.totalPrintTimeSeconds / 3600;
 
   const materialLines: CostBreakdownLine[] = plate.filaments.map((f) => {
-    const pricePerKg =
-      inputs.materialPriceOverrides[f.filamentId] ??
-      findMaterialPriceForFilament(f, settings);
+    const pricePerKg = findFilamentPrice(f, settings, inputs);
     const rawAmount = (f.usedGramsTotal / 1000) * pricePerKg;
     // Never bill less than 1 cent per material actually used.
     const amount = rawAmount > 0 ? Math.max(rawAmount, 0.01) : 0;
     return {
-      label: `${f.type} ${f.color} (${f.usedGramsTotal.toFixed(1)} g)`,
+      label: `${inputs.externalSpools?.[f.filamentId]?.name ?? `${f.type} ${f.color}`} (${f.usedGramsTotal.toFixed(1)} g)`,
       amount,
     };
   });

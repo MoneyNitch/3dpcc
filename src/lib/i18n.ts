@@ -1,17 +1,50 @@
 import type { Currency, Language } from "./types";
+import { getCurrencySymbol } from "./currency";
 
 export type { Currency, Language };
 
 const strings: Record<string, Record<Language, string>> = {
+  "filamentDb.title": { de: "Externe Filamentdatenbanken", en: "External filament databases" },
+  "filamentDb.description": { de: "Spoolman und FilaMan verbinden und Spulen direkt im Kostenrechner auswählen. Es werden nur Daten gelesen; Bestände werden nicht verändert.", en: "Connect Spoolman and FilaMan and select spools directly in the calculator. Read-only access; inventory is not changed." },
+  "filamentDb.url": { de: "Server-Adresse (leer = deaktiviert)", en: "Server URL (empty = disabled)" },
+  "filamentDb.apiKey": { de: "API-Schlüssel", en: "API key" },
+  "filamentDb.keepKey": { de: "Leer lassen, um den Schlüssel zu behalten", en: "Leave empty to keep the saved key" },
+  "filamentDb.keyPlaceholder": { de: "Optional bei Spoolman, erforderlich bei FilaMan", en: "Optional for Spoolman, required for FilaMan" },
+  "filamentDb.clearKey": { de: "Gespeicherten Schlüssel entfernen", en: "Remove saved key" },
+  "filamentDb.spoolmanHelp": { de: "Spoolman-Basisadresse, z. B. http://192.168.1.10:7912. Optionaler Schlüssel wird als Bearer-Token gesendet.", en: "Spoolman base URL, e.g. http://192.168.1.10:7912. An optional key is sent as a Bearer token." },
+  "filamentDb.filamanHelp": { de: "FilaMan-System-Basisadresse, z. B. http://192.168.1.10:8083. Benutzer-API-Schlüssel in FilaMan erstellen; kein Geräte-Token verwenden.", en: "FilaMan System base URL, e.g. http://192.168.1.10:8083. Create a user API key in FilaMan; do not use a device token." },
+  "filamentDb.keyHelp": { de: "Schlüssel werden verschlüsselt gespeichert und nicht zurück an den Browser gesendet. Bei einer anderen Server-Adresse muss der Schlüssel neu eingegeben werden. Nur vertrauenswürdige Server im privaten Netzwerk verwenden; für entfernte Server HTTPS nutzen.", en: "Keys are encrypted at rest and never returned to the browser. Re-enter the key when changing servers. Only use trusted servers on your private network; use HTTPS for remote servers." },
+  "filamentDb.saved": { de: "Verbindung gespeichert.", en: "Connection saved." },
+  "filamentDb.testing": { de: "Verbindung wird geprüft …", en: "Testing connection …" },
+  "filamentDb.save": { de: "Prüfen und speichern", en: "Test and save" },
+  "filamentDb.error.input": { de: "Bitte gültige Verbindungsdaten eingeben.", en: "Enter valid connection settings." },
+  "filamentDb.error.url": { de: "Bitte eine HTTP- oder HTTPS-Adresse ohne Zugangsdaten, Suchparameter oder Fragment eingeben.", en: "Enter an HTTP or HTTPS URL without embedded credentials, query parameters, or fragments." },
+  "filamentDb.error.auth": { de: "Zugriff verweigert. API-Schlüssel und Leseberechtigungen prüfen.", en: "Access denied. Check the API key and read permissions." },
+  "filamentDb.error.connection": { de: "Filamentdatenbank nicht erreichbar. Adresse, Netzwerk und Server prüfen.", en: "Cannot reach the filament database. Check its URL, network, and server." },
+  "filamentDb.error.response": { de: "Die Filamentdatenbank hat ein nicht unterstütztes Datenformat geliefert. API-Version und Adresse prüfen.", en: "The filament database returned an unsupported response. Check the API version and URL." },
+  "filamentDb.error.limit": { de: "Die Filamentdatenbank liefert zu viele Daten (maximal 10.000 Spulen bzw. 5 MB pro Antwort).", en: "The filament database returned too much data (maximum 10,000 spools or 5 MB per response)." },
+  "filamentDb.error.config": { de: "Die Verbindungskonfiguration konnte nicht gelesen oder gespeichert werden. Serverprotokoll und Schreibrechte prüfen.", en: "Could not read or save the connection configuration. Check server logs and write permissions." },
+  "filamentDb.loading": { de: "Spulen werden geladen …", en: "Loading spools …" },
+  "filamentDb.loadSpools": { de: "Spulen laden / aktualisieren", en: "Load / refresh spools" },
+  "filamentDb.useCurrentPrice": { de: "Aktuellen Spulenpreis übernehmen", en: "Use current spool price" },
+  "filamentDb.configure": { de: "Spoolman oder FilaMan in den Einstellungen verbinden.", en: "Connect Spoolman or FilaMan in Settings." },
+  "filamentDb.empty": { de: "Keine aktiven Spulen gefunden.", en: "No active spools found." },
+  "filamentDb.spoolFor": { de: "Spule für {material} (Filament {id})", en: "Spool for {material} (filament {id})" },
+  "filamentDb.noSpool": { de: "Keine externe Spule (lokaler / manueller Preis)", en: "No external spool (local / manual price)" },
+  "filamentDb.noPrice": { de: "Kein Kilopreis verfügbar", en: "Price per kg unavailable" },
+  "filamentDb.manualPrice": { de: "Preis oder ursprüngliches Nettogewicht fehlt. Bitte den Kilopreis oben manuell eingeben; bis dahin gilt der bisherige / lokale Preis.", en: "Price or original net weight is missing. Enter the price per kg above; until then the existing / local price is used." },
+  "filamentDb.snapshotNote": { de: "Spule und Kilopreis werden mit den Kosten gespeichert. Erneute Auswahl übernimmt den aktuellen externen Preis; kein Bestandsabzug.", en: "Spool and price per kg are saved with the costs. Select again to use the current external price; no inventory is deducted." },
+  "filamentDb.currencyNote": { de: "Externe Preise müssen in der hier eingestellten Währung vorliegen. Keine automatische Währungsumrechnung.", en: "External prices must use the currency configured here. No automatic currency conversion." },
+  "cost.saveError": { de: "Kosten konnten nicht gespeichert werden. Bitte erneut versuchen.", en: "Could not save costs. Please try again." },
   "nav.prints": { de: "Drucke", en: "Prints" },
   "nav.settings": { de: "Einstellungen", en: "Settings" },
   "nav.invoices": { de: "Rechnungen", en: "Invoices" },
   "nav.quotes": { de: "Angebote", en: "Quotes" },
   "dashboard.title": { de: "Meine 3D-Drucke", en: "My 3D prints" },
-  "dashboard.subtitle": { de: "Lade eine gcode.3mf Datei hoch oder lege einen Druck manuell an.", en: "Upload a gcode.3mf file or create a print manually." },
+  "dashboard.subtitle": { de: "Lade eine geslicte 3MF-Datei hoch oder lege einen Druck manuell an.", en: "Upload a sliced 3MF file or create a print manually." },
   "dashboard.empty": { de: "Noch keine Drucke gespeichert.", en: "No prints saved yet." },
-  "upload.dropText": { de: "gcode.3mf Datei hier ablegen oder klicken", en: "Drop a gcode.3mf file here or click" },
-  "upload.hint": { de: "Exportiert aus Bambu Studio oder OrcaSlicer", en: "Exported from Bambu Studio or OrcaSlicer" },
+  "upload.dropText": { de: "3MF-Datei hier ablegen oder klicken", en: "Drop a 3MF file here or click" },
+  "upload.hint": { de: "Geslicte Dateien aus Bambu Studio oder OrcaSlicer", en: "Sliced files from Bambu Studio or OrcaSlicer" },
   "upload.processing": { de: "Wird verarbeitet...", en: "Processing..." },
   "upload.genericError": { de: "Upload fehlgeschlagen.", en: "Upload failed." },
   "manual.add": { de: "+ Druck manuell anlegen", en: "+ Add print manually" },
@@ -33,6 +66,7 @@ const strings: Record<string, Record<Language, string>> = {
   "print.deleteConfirm": { de: "Diesen Druck wirklich löschen?", en: "Really delete this print?" },
   "print.totalWeight": { de: "Gesamtgewicht", en: "Total weight" },
   "print.printTime": { de: "Druckzeit", en: "Print time" },
+  "print.gcodeMissingNote": { de: "Hinweis: Diese 3MF-Datei enthält keinen G-Code. Preis, Filamentverbrauch und Druckzeit basieren auf den Slicing-Metadaten. Die Aufschlüsselung nach Objekt und Druckbereich ist daher nicht verfügbar.", en: "Note: This 3MF file contains no G-code. Price, filament usage, and print time are based on slicer metadata. Breakdown by object and print feature is unavailable." },
   "print.layers": { de: "Layer", en: "Layers" },
   "print.weightByPart": { de: "Gewicht nach Teil", en: "Weight by part" },
   "print.category": { de: "Kategorie", en: "Category" },
@@ -65,6 +99,8 @@ const strings: Record<string, Record<Language, string>> = {
   "print.view2d": { de: "2D", en: "2D" },
   "print.view3d": { de: "3D", en: "3D" },
   "print.toolpathPreviewNote": { de: "Vollständige Druckbahnen aus G-Code mit räumlichen Filamentbahnen. Kein originales Oberflächenmodell.", en: "Complete G-code toolpaths rendered as spatial filament strands. Not the original surface model." },
+  "print.layerSliderLabel": { de: "Schicht {current} / {total} · Z {height} mm", en: "Layer {current} / {total} · Z {height} mm" },
+  "print.layerSliderAria": { de: "Sichtbare Druckschicht auswählen", en: "Select visible print layer" },
   "print.modelUnavailable": { de: "Für diesen Druck sind keine darstellbaren 3D-Daten verfügbar.", en: "No displayable 3D data is available for this print." },
   "print.modelLoading": { de: "3D-Modell wird geladen …", en: "Loading 3D model …" },
   "print.modelComputing": { de: "Die 3D-Vorschau wird im Hintergrund vorbereitet. Du kannst den Druck bereits bearbeiten; die Ansicht aktualisiert sich automatisch.", en: "The 3D preview is being prepared in the background. You can already edit the print; this view updates automatically." },
@@ -280,6 +316,6 @@ export function translate(language: Language, key: string, vars?: Record<string,
   return value;
 }
 
-export function currencySymbol(currency: Currency): string {
-  return currency === "USD" ? "$" : "€";
+export function currencySymbol(currency: Currency, language: Language = "de"): string {
+  return getCurrencySymbol(currency, language);
 }

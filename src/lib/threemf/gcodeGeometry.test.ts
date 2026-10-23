@@ -3,6 +3,7 @@ import { test } from "node:test";
 import AdmZip from "adm-zip";
 import { parseGcodeGeometry } from "./gcodeGeometry";
 import { parse3mfGeometry } from "./parser";
+import { getToolpathLayerHeights } from "../toolpathLayers";
 
 test("renders only depositing print moves, preserving tool colors and ignoring placeholder tools", () => {
   const geometry = parseGcodeGeometry(`
@@ -71,11 +72,24 @@ test("preserves slicer extrusion width and layer height changes", () => {
   assert.deepEqual(geometry?.widths, [0.25, 0.3]);
   assert.deepEqual(geometry?.heights, [0.1, 0.1]);
 });
+
+test("finds printable layer heights from horizontal extrusion segments", () => {
+  const geometry = parseGcodeGeometry(`; FEATURE: Outer wall
+G1 X1 Z0.2
+G1 X2 E1
+G1 X3 Z0.4
+G1 X4 E1
+G1 X5 Z0.6
+G1 X6 E1`);
+  assert.ok(geometry);
+  assert.deepEqual(getToolpathLayerHeights(geometry), [0.2, 0.4, 0.6]);
+});
+
 test("returns null for travel-only G-code", () => {
   assert.equal(parseGcodeGeometry("; FEATURE: Outer wall\nG1 X10\nG1 E5\nG1 X20 E-1"), null);
 });
 
-test("falls back to G-code for empty or missing model resources, but preserves embedded meshes", () => {
+test("prefers G-code paths for layer preview and uses meshes when no paths are available", () => {
   const zip = new AdmZip();
   zip.addFile("Metadata/plate_1.gcode", Buffer.from("; FEATURE: Outer wall\nG1 X10 E1"));
   assert.equal(parse3mfGeometry(zip.toBuffer())?.kind, "toolpath");
@@ -85,7 +99,10 @@ test("falls back to G-code for empty or missing model resources, but preserves e
     <vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices>
     <triangles><triangle v1="0" v2="1" v3="2"/></triangles>
     </mesh></object></resources><build><item objectid="1" transform="1 0 0 0 1 0 0 0 1 5 0 0"/></build></model>`));
-  const mesh = parse3mfGeometry(zip.toBuffer());
+  assert.equal(parse3mfGeometry(zip.toBuffer())?.kind, "toolpath");
+  const meshZip = new AdmZip();
+  meshZip.addFile("3D/3dmodel.model", zip.getEntry("3D/3dmodel.model")!.getData());
+  const mesh = parse3mfGeometry(meshZip.toBuffer());
   assert.notEqual(mesh?.kind, "toolpath");
   assert.deepEqual(mesh?.positions, [5, 0, 0, 6, 0, 0, 5, 1, 0]);
 });

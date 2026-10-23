@@ -3,6 +3,8 @@ import { getDbConfigView } from "@/lib/dbConfig";
 import { translate } from "@/lib/i18n";
 import { SettingsForm } from "@/components/SettingsForm";
 import { DatabaseSettingsForm } from "@/components/DatabaseSettingsForm";
+import { FilamentConnectionSettings } from "@/components/FilamentConnectionSettings";
+import { getFilamentConnectionsView } from "@/lib/filamentConfig";
 
 export const dynamic = "force-dynamic";
 
@@ -27,8 +29,11 @@ export default async function SettingsPage() {
           </p>
         </div>
       )}
-      <DatabaseSettingsForm initialConfig={dbConfig} />
-      <SettingsForm initialSettings={settings} />
+      <SettingsForm
+        initialSettings={settings}
+        databaseSettings={<DatabaseSettingsForm initialConfig={dbConfig} />}
+        filamentSettings={<FilamentConnectionSettings initialConnections={getFilamentConnectionsView()} />}
+      />
     </div>
   );
 }

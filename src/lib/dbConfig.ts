@@ -60,7 +60,7 @@ function getEncryptionKey(): Buffer {
   return key;
 }
 
-function encrypt(plainText: string): string {
+export function encryptSecret(plainText: string): string {
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
@@ -68,7 +68,7 @@ function encrypt(plainText: string): string {
   return [iv, cipher.getAuthTag(), ciphertext].map((b) => b.toString("base64")).join(":");
 }
 
-function decrypt(payload: string): string {
+export function decryptSecret(payload: string): string {
   const key = getEncryptionKey();
   const [ivB64, authTagB64, ciphertextB64] = payload.split(":");
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
@@ -113,7 +113,7 @@ export function getDbConfigView(): DbConfigView {
 export function getStoredPassword(): string | undefined {
   const stored = readStoredConfig();
   const encrypted = stored?.connection?.passwordEncrypted;
-  return encrypted ? decrypt(encrypted) : undefined;
+  return encrypted ? decryptSecret(encrypted) : undefined;
 }
 
 export function saveDbConfig(input: SaveDbConfigInput): void {
@@ -123,7 +123,7 @@ export function saveDbConfig(input: SaveDbConfigInput): void {
   }
   const existing = readStoredConfig();
   const passwordEncrypted = input.password
-    ? encrypt(input.password)
+    ? encryptSecret(input.password)
     : (existing?.connection?.passwordEncrypted ?? null);
 
   writeStoredConfig({
@@ -161,7 +161,7 @@ export function resolveDbConnection(): ResolvedDbConnection {
   if (stored) {
     if (stored.driver === "sqlite" || !stored.connection) return { driver: "sqlite" };
     const password = stored.connection.passwordEncrypted
-      ? decrypt(stored.connection.passwordEncrypted)
+      ? decryptSecret(stored.connection.passwordEncrypted)
       : undefined;
     return {
       driver: stored.driver,

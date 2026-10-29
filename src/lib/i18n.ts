@@ -1,4 +1,4 @@
-import type { Currency, Language } from "./types";
+import type { Currency, Language, LanguagePack } from "./types";
 import { getCurrencySymbol } from "./currency";
 
 export type { Currency, Language };
@@ -161,6 +161,39 @@ const strings: Record<string, Record<Language, string>> = {
   "settings.general": { de: "Allgemein", en: "General" },
   "settings.version": { de: "Version", en: "Version" },
   "settings.language": { de: "Sprache", en: "Language" },
+  "settings.languagePacks": { de: "Sprachpakete", en: "Language packs" },
+  "settings.languagePackHelp": {
+    de: "Lade eine JSON-Datei mit Sprachcode, Anzeigename und Übersetzungen hoch. Lade zuerst die Vorlage herunter und übersetze die Werte. Fehlende Übersetzungen erscheinen auf Englisch.",
+    en: "Upload a JSON file containing a language code, display name, and translations. Download the template first and translate its values. Missing translations fall back to English.",
+  },
+  "settings.downloadLanguageTemplate": { de: "Übersetzungsvorlage herunterladen", en: "Download translation template" },
+  "settings.uploadLanguagePack": { de: "JSON-Sprachpaket hochladen", en: "Upload JSON language pack" },
+  "settings.removeLanguagePack": { de: "Entfernen", en: "Remove" },
+  "settings.languagePackImported": { de: "Sprachpaket „{language}“ hinzugefügt. Speichere die Einstellungen, um es zu übernehmen.", en: "Language pack “{language}” added. Save settings to apply it." },
+  "settings.languagePackInvalid": { de: "Das Sprachpaket ist ungültig:", en: "The language pack is invalid:" },
+  "settings.languagePackTooLarge": { de: "Die Sprachpaket-Datei darf höchstens 1 MB groß sein.", en: "The language pack file must be no larger than 1 MB." },
+  "support.title": { de: "Support-Export", en: "Support export" },
+  "support.description": {
+    de: "Erstelle ein ZIP mit Diagnosebericht und optionalen Browserfehlern sowie deiner Fehlerbeschreibung und den Reproduktionsschritten.",
+    en: "Create a ZIP with diagnostics, optional browser errors, your issue description, and reproduction steps.",
+  },
+  "support.privacy": {
+    de: "Das ZIP wird von deiner App erstellt und heruntergeladen, nicht an einen Supportdienst übertragen. Es enthält keine Passwörter, API-Schlüssel, Serveradressen, Druckdateien oder gespeicherten Drucknamen. Fehlerprotokolle sind optional und können persönliche Daten enthalten: prüfe sie vor dem Export.",
+    en: "The ZIP is created by your app and downloaded; it is not sent to a support service. It excludes passwords, API keys, server addresses, print files, and saved print names. Error logs are optional and may contain personal data; review them before exporting.",
+  },
+  "support.includeErrors": {
+    de: "Browserfehler und unbehandelte Promise-Fehler einschließen, die seit dem Öffnen der Einstellungsseite erfasst wurden ({count})",
+    en: "Include browser errors and unhandled promise rejections captured since opening Settings ({count})",
+  },
+  "support.reviewErrors": { de: "Erfasste Fehler vor dem Export ansehen", en: "Review captured errors before exporting" },
+  "support.noErrors": { de: "Bisher wurden keine Browserfehler erfasst.", en: "No browser errors have been captured so far." },
+  "support.issueTitle": { de: "Kurzer Fehler-Titel", en: "Short issue title" },
+  "support.issueDescription": { de: "Was ist passiert? Was hast du erwartet?", en: "What happened? What did you expect?" },
+  "support.reproductionSteps": { de: "Schritte zum Reproduzieren", en: "Steps to reproduce" },
+  "support.export": { de: "Support-ZIP herunterladen", en: "Download support ZIP" },
+  "support.exporting": { de: "ZIP wird erstellt …", en: "Creating ZIP …" },
+  "support.exported": { de: "Support-ZIP heruntergeladen. Bitte prüfe die Dateien vor dem Weitergeben.", en: "Support ZIP downloaded. Review its files before sharing." },
+  "support.exportFailed": { de: "Support-ZIP konnte nicht erstellt werden. Bitte erneut versuchen.", en: "Could not create the support ZIP. Please try again." },
   "settings.currency": { de: "Währung", en: "Currency" },
   "settings.enable3dPreview": { de: "3D-Vorschau aktivieren", en: "Enable 3D preview" },
   "settings.previewComputePercent": { de: "Arbeitsanteil der 3D-Hintergrundberechnung", en: "3D background calculation duty cycle" },
@@ -207,6 +240,7 @@ const strings: Record<string, Record<Language, string>> = {
   "settings.costPerUnit": { de: "Preis pro Einheit", en: "Price per unit" },
   "settings.addAccessoryMaterial": { de: "+ Zubehör hinzufügen", en: "+ Add accessory" },
   "settings.selectPrinter": { de: "Drucker auswählen", en: "Select printer" },
+  "settings.addPrinter": { de: "+ Drucker hinzufügen", en: "+ Add printer" },
   "settings.useAsDefault": { de: "Als Standard verwenden", en: "Use as default" },
   "settings.printerName": { de: "Druckername", en: "Printer name" },
   "settings.powerConsumption": { de: "Leistung (W)", en: "Power consumption (W)" },
@@ -310,10 +344,95 @@ const strings: Record<string, Record<Language, string>> = {
   "print.deleting": { de: "Wird gelöscht...", en: "Deleting..." },
 };
 
-export function translate(language: Language, key: string, vars?: Record<string, string | number>): string {
-  let value = strings[key]?.[language] ?? key;
+export function translate(
+  language: Language,
+  key: string,
+  vars?: Record<string, string | number>,
+  languagePacks: LanguagePack[] = [],
+): string {
+  const packTranslation = languagePacks.find((pack) => pack.code === language)?.translations[key];
+  const fallbackLanguage = language === "de" ? "de" : "en";
+  let value = packTranslation ?? strings[key]?.[fallbackLanguage] ?? key;
   for (const [name, replacement] of Object.entries(vars ?? {})) value = value.replace(`{${name}}`, String(replacement));
   return value;
+}
+
+export function getIntlLocale(language: Language): string {
+  return language === "de" ? "de-DE" : language === "en" ? "en-US" : language;
+}
+
+export function createLanguagePackTemplate(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(strings).map(([key, translations]) => [key, translations.en]),
+  );
+}
+
+export function parseLocalizedNumber(value: string, language: Language): number {
+  const locale = getIntlLocale(language);
+  const numberFormat = new Intl.NumberFormat(locale);
+  const digitFormat = new Intl.NumberFormat(locale, { useGrouping: false });
+  const parts = numberFormat.formatToParts(12345.6);
+  const decimal = parts.find((part) => part.type === "decimal")?.value ?? ".";
+  const group = parts.find((part) => part.type === "group")?.value;
+  let normalized = value.trim();
+
+  for (let digit = 0; digit <= 9; digit += 1) {
+    normalized = normalized.split(digitFormat.format(digit)).join(String(digit));
+  }
+  const minusSign = numberFormat.formatToParts(-1).find((part) => part.type === "minusSign")?.value;
+  if (minusSign) normalized = normalized.split(minusSign).join("-");
+
+  if (normalized.includes(decimal)) {
+    if (group) normalized = normalized.split(group).join("");
+    if (group && /\s/u.test(group)) normalized = normalized.replace(/[\s\u00a0\u202f]/gu, "");
+    normalized = normalized.replace(decimal, ".");
+  } else if (group && /\s/u.test(group)) {
+    normalized = normalized.replace(/[\s\u00a0\u202f]/gu, "");
+  }
+
+  return Number.parseFloat(normalized);
+}
+
+export function parseLanguagePack(value: unknown): LanguagePack {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The file must contain a JSON object.");
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.code !== "string" || typeof candidate.name !== "string") {
+    throw new Error('The language pack must have "code" and "name" strings.');
+  }
+
+  let code: string;
+  try {
+    code = Intl.getCanonicalLocales(candidate.code.trim())[0] ?? "";
+  } catch {
+    throw new Error('"code" must be a valid BCP 47 language tag, such as "fr" or "pt-BR".');
+  }
+  if (!code || code === "de" || code === "en") {
+    throw new Error('The code must be a language not already built in ("de" and "en" are reserved).');
+  }
+
+  const name = candidate.name.trim();
+  if (!name || name.length > 80) {
+    throw new Error('"name" must contain between 1 and 80 characters.');
+  }
+  if (!candidate.translations || typeof candidate.translations !== "object" || Array.isArray(candidate.translations)) {
+    throw new Error('"translations" must be an object containing translation keys and text.');
+  }
+
+  const entries = Object.entries(candidate.translations);
+  if (entries.length === 0 || entries.length > 2000) {
+    throw new Error('"translations" must contain between 1 and 2000 entries.');
+  }
+  const validatedEntries: [string, string][] = [];
+  for (const [key, translation] of entries) {
+    if (!key.trim() || typeof translation !== "string" || translation.length > 10000) {
+      throw new Error("Each translation must have a non-empty key and a text value of at most 10000 characters.");
+    }
+    validatedEntries.push([key, translation]);
+  }
+  return { code, name, translations: Object.fromEntries(validatedEntries) };
 }
 
 export function currencySymbol(currency: Currency, language: Language = "de"): string {

@@ -10,6 +10,16 @@ tower and total) and multi-color information, and calculates print costs.
 > under active development, so errors, missing features, or incomplete
 > functionality may occur. Feedback and suggestions are welcome. This is my first open-source project, and I also plan to program a large part of it using AI, since I wanted to test it out. 
 
+## Screenshots
+
+### Print overview
+
+![3D-PCC print overview showing the upload area and saved prints](./img/home.png)
+
+### Print details and cost calculator
+
+![3D-PCC print details with the interactive preview and cost calculator](./img/costcalc.png)
+
 ## Features
 
 - Drag-and-drop upload of `.gcode.3mf` files on desktop and mobile
@@ -138,6 +148,39 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Custom language packs
+
+Open **Settings → General**, download the translation template, edit its
+language code, display name, and translated values, then upload the JSON file.
+Save settings and select the new language to apply it. Missing translations
+fall back to English. Uploading a pack with the same language code replaces it.
+Keep placeholders such as `{count}` unchanged in translated values.
+
+Language pack format:
+
+```json
+{
+  "code": "fr",
+  "name": "Français",
+  "translations": {
+    "nav.prints": "Impressions",
+    "nav.settings": "Paramètres"
+  }
+}
+```
+
+### Support report
+
+Use the **Support export** tab in Settings to download a ZIP containing
+`diagnostics.json` and `browser-errors.json`. It includes app/runtime versions,
+browser details, selected configuration flags and counts, plus the issue
+description and reproduction steps you enter. Browser errors and unhandled
+promise rejections are collected in memory only while the Settings page is
+open; include them with the unchecked-by-default option and review the captured
+messages and stacks before exporting. They are sent only to the app itself to
+build the ZIP, not to an external support service. The export excludes
+credentials, service URLs, print files, and print names.
 
 ### Access from a mobile device
 

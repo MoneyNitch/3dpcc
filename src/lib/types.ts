@@ -175,6 +175,7 @@ export interface AppSettings {
   defaultPrinterId: string;
   costs: CostSettings;
   general: GeneralSettings;
+  customLanguagePacks: LanguagePack[];
   numbering: {
     invoice: DocumentNumberingSettings;
     quote: DocumentNumberingSettings;
@@ -183,9 +184,15 @@ export interface AppSettings {
   setupCompleted: boolean;
 }
 
-export type Language = "de" | "en";
+export type Language = string;
 export type { Currency };
 export type Theme = "light" | "dark";
+
+export interface LanguagePack {
+  code: string;
+  name: string;
+  translations: Record<string, string>;
+}
 
 export interface PreviewQueueEntry {
   id: string;

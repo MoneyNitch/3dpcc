@@ -17,10 +17,10 @@ export default async function HomePage() {
     <div className="flex flex-col gap-8">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          {translate(lang, "dashboard.title")}
+          {translate(lang, "dashboard.title", undefined, settings.customLanguagePacks)}
         </h1>
         <p className="mt-1 text-slate-500 dark:text-slate-400">
-          {translate(lang, "dashboard.subtitle")}
+          {translate(lang, "dashboard.subtitle", undefined, settings.customLanguagePacks)}
         </p>
       </div>
 
@@ -29,16 +29,15 @@ export default async function HomePage() {
 
       {prints.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-400 dark:border-slate-700 dark:text-slate-500">
-          {translate(lang, "dashboard.empty")}
+          {translate(lang, "dashboard.empty", undefined, settings.customLanguagePacks)}
         </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {prints.map((print) => (
-            <PrintCard key={print.id} print={print} lang={lang} />
+            <PrintCard key={print.id} print={print} lang={lang} languagePacks={settings.customLanguagePacks} />
           ))}
         </div>
       )}
     </div>
   );
 }
-

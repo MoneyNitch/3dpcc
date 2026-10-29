@@ -48,3 +48,8 @@ test("preserves supported currencies and repairs invalid currency settings", () 
   });
   assert.equal(invalid.general.currency, defaultSettings.general.currency);
 });
+
+test("migrates settings without custom language packs", () => {
+  const settings = migrateSettings({ ...defaultSettings, customLanguagePacks: undefined });
+  assert.deepEqual(settings.customLanguagePacks, []);
+});

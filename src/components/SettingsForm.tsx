@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useState, type ChangeEvent, type ReactNode } from "react";
 import type {
   AccessoryMaterial,
   AppSettings,
@@ -12,12 +12,19 @@ import type {
 } from "@/lib/types";
 import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
-import { currencySymbol } from "@/lib/i18n";
+import {
+  createLanguagePackTemplate,
+  currencySymbol,
+  getIntlLocale,
+  parseLanguagePack,
+  parseLocalizedNumber,
+} from "@/lib/i18n";
 import { getCurrencyOptions } from "@/lib/currency";
 import packageJson from "../../package.json";
 import { PreviewQueueSettings } from "./PreviewQueueSettings";
+import { SupportExport } from "./SupportExport";
 
-type SettingsTab = "general" | "database" | "filaments" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
+type SettingsTab = "general" | "support" | "database" | "filaments" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
 
 export function SettingsForm({ initialSettings, databaseSettings, filamentSettings }: {
   initialSettings: AppSettings;
@@ -32,17 +39,22 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
   const [printerSaved, setPrinterSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [languagePackMessage, setLanguagePackMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const unit = currencySymbol(settings.general.currency, lang);
   const currencies = getCurrencyOptions(lang);
   const formatDecimal = (value: number, maximumFractionDigits = 3) =>
-    new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+    new Intl.NumberFormat(getIntlLocale(lang), {
       useGrouping: false,
       maximumFractionDigits,
     }).format(value);
   const parseDecimal = (value: string) =>
-    parseFloat(lang === "de" ? value.replace(",", ".") : value) || 0;
+    parseLocalizedNumber(value, lang) || 0;
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "support", label: t("support.title") },
     { id: "database", label: t("db.title") },
     { id: "filaments", label: t("filamentDb.title") },
     { id: "queue", label: t("queue.title") },
@@ -167,6 +179,68 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     setSaved(false);
   }
 
+  async function uploadLanguagePack(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      setLanguagePackMessage({ type: "error", text: t("settings.languagePackTooLarge") });
+      return;
+    }
+
+    try {
+      const pack = parseLanguagePack(JSON.parse(await file.text()));
+      setSettings((current) => ({
+        ...current,
+        customLanguagePacks: [
+          ...current.customLanguagePacks.filter((existing) => existing.code !== pack.code),
+          pack,
+        ],
+      }));
+      setSaved(false);
+      setLanguagePackMessage({
+        type: "success",
+        text: t("settings.languagePackImported", { language: pack.name }),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : t("settings.languagePackInvalid");
+      setLanguagePackMessage({
+        type: "error",
+        text: `${t("settings.languagePackInvalid")} ${detail}`,
+      });
+    }
+  }
+
+  function downloadLanguageTemplate() {
+    const template = {
+      code: "fr",
+      name: "Français",
+      translations: createLanguagePackTemplate(),
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(template, null, 2)], { type: "application/json" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "3dpcc-language-template.json";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function removeLanguagePack(code: Language) {
+    setSettings((current) => ({
+      ...current,
+      customLanguagePacks: current.customLanguagePacks.filter((pack) => pack.code !== code),
+      general: current.general.language === code
+        ? { ...current.general, language: "de" }
+        : current.general,
+    }));
+    setSaved(false);
+    setLanguagePackMessage(null);
+  }
+
   async function save() {
     setSaveError(false);
     const wasFirstRun = !settings.setupCompleted;
@@ -184,7 +258,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
       return false;
     }
     setSettings(payload);
-    setLocale(payload.general.language, payload.general.currency);
+    setLocale(payload.general.language, payload.general.currency, payload.customLanguagePacks);
     setSaved(true);
     router.refresh();
     if (wasFirstRun) router.push("/");
@@ -223,6 +297,15 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
       </div>
 
       <div
+        id="support-settings-panel"
+        role="tabpanel"
+        aria-labelledby="support-settings-tab"
+        hidden={activeTab !== "support"}
+      >
+        <SupportExport />
+      </div>
+
+      <div
         id="database-settings-panel"
         role="tabpanel"
         aria-labelledby="database-settings-tab"
@@ -258,6 +341,9 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
             >
               <option value="de">Deutsch</option>
               <option value="en">English</option>
+              {settings.customLanguagePacks.map((pack) => (
+                <option key={pack.code} value={pack.code}>{pack.name} ({pack.code})</option>
+              ))}
             </select>
           </Field>
           <Field label={t("settings.currency")}>
@@ -273,6 +359,56 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
               ))}
             </select>
           </Field>
+        </div>
+        <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+          <h3 className="font-medium text-slate-800 dark:text-slate-100">{t("settings.languagePacks")}</h3>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.languagePackHelp")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={downloadLanguageTemplate}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              {t("settings.downloadLanguageTemplate")}
+            </button>
+            <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700">
+              {t("settings.uploadLanguagePack")}
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={uploadLanguagePack}
+                className="sr-only"
+              />
+            </label>
+          </div>
+          {languagePackMessage && (
+            <p
+              role={languagePackMessage.type === "error" ? "alert" : "status"}
+              className={`mt-2 text-sm ${
+                languagePackMessage.type === "error"
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-green-700 dark:text-green-400"
+              }`}
+            >
+              {languagePackMessage.text}
+            </p>
+          )}
+          {settings.customLanguagePacks.length > 0 && (
+            <ul className="mt-3 flex flex-col gap-2">
+              {settings.customLanguagePacks.map((pack) => (
+                <li key={pack.code} className="flex items-center justify-between gap-3 text-sm text-slate-700 dark:text-slate-200">
+                  <span>{pack.name} ({pack.code})</span>
+                  <button
+                    type="button"
+                    onClick={() => removeLanguagePack(pack.code)}
+                    className="text-xs font-medium text-red-600 hover:underline dark:text-red-400"
+                  >
+                    {t("settings.removeLanguagePack")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <label className="mt-4 flex items-start gap-3 text-sm text-slate-700 dark:text-slate-200">
           <input
@@ -405,7 +541,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
               <span className="text-xs text-slate-400 dark:text-slate-500">{t("settings.unitsPerPack")}</span>
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 {t("settings.costPerUnit")}: {unit}
-                {new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+                {new Intl.NumberFormat(getIntlLocale(lang), {
                   minimumFractionDigits: 3,
                   maximumFractionDigits: 3,
                 }).format(item.pricePerPack / Math.max(1, item.unitsPerPack))}
@@ -655,7 +791,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
 
       {activeTab === "queue" && <PreviewQueueSettings />}
       <button
-        hidden={activeTab === "queue" || activeTab === "database" || activeTab === "filaments"}
+        hidden={activeTab === "queue" || activeTab === "database" || activeTab === "filaments" || activeTab === "support"}
         onClick={save}
         className="self-start rounded-lg bg-orange-500 px-5 py-2.5 font-medium text-white hover:bg-orange-600"
       >
@@ -688,7 +824,7 @@ function NumberInput({
   step?: number;
 }) {
   const { lang } = useLocale();
-  const formatDecimal = new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+  const formatDecimal = new Intl.NumberFormat(getIntlLocale(lang), {
     useGrouping: false,
     maximumFractionDigits: 3,
   }).format(value);
@@ -698,7 +834,7 @@ function NumberInput({
       inputMode="decimal"
       step={step}
       defaultValue={formatDecimal}
-      onChange={(e) => onChange(parseFloat(lang === "de" ? e.target.value.replace(",", ".") : e.target.value) || 0)}
+      onChange={(e) => onChange(parseLocalizedNumber(e.target.value, lang) || 0)}
       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
     />
   );

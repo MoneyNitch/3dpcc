@@ -24,12 +24,16 @@ export function isCurrencyCode(value: unknown): value is Currency {
   return typeof value === "string" && CURRENCY_CODES.includes(value as Currency);
 }
 
-const currencyOptionsCache = new Map<"de" | "en", { code: Currency; name: string }[]>();
+const currencyOptionsCache = new Map<string, { code: Currency; name: string }[]>();
 
-export function getCurrencyOptions(language: "de" | "en"): { code: Currency; name: string }[] {
+function getIntlLocale(language: string): string {
+  return language === "de" ? "de-DE" : language === "en" ? "en-US" : language;
+}
+
+export function getCurrencyOptions(language: string): { code: Currency; name: string }[] {
   const cached = currencyOptionsCache.get(language);
   if (cached) return cached;
-  const locale = language === "de" ? "de-DE" : "en-US";
+  const locale = getIntlLocale(language);
   const names = new Intl.DisplayNames([locale], { type: "currency" });
   const options = CURRENCY_CODES
     .map((code) => ({ code, name: names.of(code) ?? code }))
@@ -38,8 +42,8 @@ export function getCurrencyOptions(language: "de" | "en"): { code: Currency; nam
   return options;
 }
 
-export function getCurrencySymbol(currency: Currency, language: "de" | "en" = "de"): string {
-  const locale = language === "de" ? "de-DE" : "en-US";
+export function getCurrencySymbol(currency: Currency, language: string = "de"): string {
+  const locale = getIntlLocale(language);
   const part = new Intl.NumberFormat(locale, {
     style: "currency",
     currency,

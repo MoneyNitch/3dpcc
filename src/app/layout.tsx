@@ -34,6 +34,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <LocaleProvider
           initialLanguage={settings.general.language}
           initialCurrency={settings.general.currency}
+          initialLanguagePacks={settings.customLanguagePacks}
         >
           <Header />
           <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "./Modal";
+import { getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
 import { useLocale } from "@/lib/locale";
 import type { Material, ParsedPlate } from "@/lib/types";
 import { ManualFilaments, manualFilamentPayload, type FilamentDraft } from "./ManualFilaments";
@@ -27,12 +28,12 @@ export function PrintDataEditor({ id, plate, manual = false, materials = [] }: {
     };
   }));
   const formatDecimal = (value: number, maximumFractionDigits = 2) =>
-    new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+    new Intl.NumberFormat(getIntlLocale(lang), {
       useGrouping: false,
       maximumFractionDigits,
     }).format(value);
   const parseDecimal = (value: string) =>
-    parseFloat(lang === "de" ? value.replace(",", ".") : value);
+    parseLocalizedNumber(value, lang);
   const [weight, setWeight] = useState(formatDecimal(plate.totalWeightGrams));
   const [minutes, setMinutes] = useState(manual ? String(plate.totalPrintTimeSeconds / 60) : String(Math.round(plate.totalPrintTimeSeconds / 60)));
   const [filaments, setFilaments] = useState(

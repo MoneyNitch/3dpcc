@@ -11,7 +11,7 @@ import { PrintNameEditor } from "@/components/PrintNameEditor";
 import { PrintDataEditor } from "@/components/PrintDataEditor";
 import { ModelPreview } from "@/components/ModelPreview";
 import { categoryLabel, formatDuration, formatGrams } from "@/lib/format";
-import { translate } from "@/lib/i18n";
+import { getIntlLocale, translate } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,8 @@ export default async function PrintDetailPage({
   const settings = await getSettings();
   requireSetupComplete(settings);
   const lang = settings.general.language;
-  const t = (key: Parameters<typeof translate>[1]) => translate(lang, key);
+  const t = (key: Parameters<typeof translate>[1]) =>
+    translate(lang, key, undefined, settings.customLanguagePacks);
   // Merge over defaults so older saved cost inputs (pre-dating new fields) stay valid.
   const costInputs = { ...defaultCostInputs(settings), ...(await getPrintCostInputs(id)) };
   const { plate } = print;
@@ -40,7 +41,7 @@ export default async function PrintDetailPage({
           {!print.manual && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{print.fileName}</p>}
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {t(print.manual ? "manual.createdAt" : "print.uploadedAt")}{" "}
-            {new Date(print.createdAt).toLocaleString(lang === "en" ? "en-US" : "de-DE")}
+            {new Date(print.createdAt).toLocaleString(getIntlLocale(lang))}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -97,7 +98,7 @@ export default async function PrintDetailPage({
               <tbody>
                 {plate.categoryTotals.map((c) => (
                   <tr key={c.category} className="border-t border-slate-100 dark:border-slate-700">
-                    <td className="py-1.5 text-slate-600 dark:text-slate-300">{categoryLabel(c.category, lang)}</td>
+                    <td className="py-1.5 text-slate-600 dark:text-slate-300">{categoryLabel(c.category, lang, settings.customLanguagePacks)}</td>
                     {plate.filaments.map((f) => {
                       const mf = (plate.categoryByFilament ?? []).find(
                         (x) => x.filamentId === f.filamentId
@@ -150,7 +151,7 @@ export default async function PrintDetailPage({
                     )}
                     {obj.categories.map((c) => (
                       <span key={c.category}>
-                        {categoryLabel(c.category, lang)}: {formatGrams(c.grams)}
+                        {categoryLabel(c.category, lang, settings.customLanguagePacks)}: {formatGrams(c.grams)}
                       </span>
                     ))}
                   </div>

@@ -7,7 +7,7 @@ import { calculateCost, findFilamentPrice, findPrinter } from "@/lib/costCalcula
 import { externalSpoolKey, type ExternalSpoolResult } from "@/lib/externalFilaments";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { useLocale } from "@/lib/locale";
-import { currencySymbol } from "@/lib/i18n";
+import { currencySymbol, getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
 
 export function CostCalculator({
   plate,
@@ -25,12 +25,12 @@ export function CostCalculator({
   const spools = spoolResults?.flatMap((result) => result.spools) ?? [];
   const unit = currencySymbol(currency, lang);
   const formatDecimal = (value: number, maximumFractionDigits = 2) =>
-    new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+    new Intl.NumberFormat(getIntlLocale(lang), {
       useGrouping: false,
       maximumFractionDigits,
     }).format(value);
   const parseDecimal = (value: string) =>
-    parseFloat(lang === "de" ? value.replace(",", ".") : value) || 0;
+    parseLocalizedNumber(value, lang) || 0;
 
   const result = useMemo(() => calculateCost(plate, settings, inputs), [plate, settings, inputs]);
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
-import { currencySymbol } from "@/lib/i18n";
+import { currencySymbol, getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
 import type { AccessoryMaterial } from "@/lib/types";
 import { Modal } from "./Modal";
 
@@ -21,14 +21,14 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
     if (!item) return;
     setName(item.name);
     setCost(
-      new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+      new Intl.NumberFormat(getIntlLocale(lang), {
         maximumFractionDigits: 4,
       }).format(item.pricePerPack / Math.max(1, item.unitsPerPack))
     );
   }
 
   function addItem() {
-    const parsedCost = parseFloat(lang === "de" ? cost.replace(",", ".") : cost);
+    const parsedCost = parseLocalizedNumber(cost, lang);
     const parsedQuantity = parseInt(quantity, 10);
     if (!name.trim() || !Number.isFinite(parsedCost)) return;
     update("extraCosts", [

@@ -12,7 +12,8 @@ export default async function SettingsPage() {
   const settings = await getSettings();
   const dbConfig = getDbConfigView();
   const lang = settings.general.language;
-  const t = (key: Parameters<typeof translate>[1]) => translate(lang, key);
+  const t = (key: Parameters<typeof translate>[1]) =>
+    translate(lang, key, undefined, settings.customLanguagePacks);
   return (
     <div className="flex flex-col gap-6">
       <div>

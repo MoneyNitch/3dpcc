@@ -11,7 +11,7 @@ import { PrintNameEditor } from "@/components/PrintNameEditor";
 import { PrintDataEditor } from "@/components/PrintDataEditor";
 import { ModelPreview } from "@/components/ModelPreview";
 import { categoryLabel, formatDuration, formatGrams } from "@/lib/format";
-import { translate } from "@/lib/i18n";
+import { getIntlLocale, translate } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,8 @@ export default async function PrintDetailPage({
   const settings = await getSettings();
   requireSetupComplete(settings);
   const lang = settings.general.language;
-  const t = (key: Parameters<typeof translate>[1]) => translate(lang, key);
+  const t = (key: Parameters<typeof translate>[1]) =>
+    translate(lang, key, undefined, settings.customLanguagePacks);
   // Merge over defaults so older saved cost inputs (pre-dating new fields) stay valid.
   const costInputs = { ...defaultCostInputs(settings), ...(await getPrintCostInputs(id)) };
   const { plate } = print;
@@ -40,7 +41,7 @@ export default async function PrintDetailPage({
           {!print.manual && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{print.fileName}</p>}
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {t(print.manual ? "manual.createdAt" : "print.uploadedAt")}{" "}
-            {new Date(print.createdAt).toLocaleString(lang === "en" ? "en-US" : "de-DE")}
+            {new Date(print.createdAt).toLocaleString(getIntlLocale(lang))}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -49,9 +50,15 @@ export default async function PrintDetailPage({
         </div>
       </div>
 
+      {plate.hasGcode === false && (
+        <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          {t("print.gcodeMissingNote")}
+        </p>
+      )}
+
       <CostInputsProvider printId={print.id} initialInputs={costInputs}>
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-          <div className="flex flex-col gap-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="flex min-w-0 flex-col gap-6">
           {(plate.thumbnailBase64 || (!print.manual && settings.general.enable3dPreview)) && (
             <ModelPreview
               key={print.id}
@@ -68,7 +75,7 @@ export default async function PrintDetailPage({
             {!print.manual && <Stat label={t("print.layers")} value={String(plate.layerCount)} />}
           </div>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm overflow-x-auto dark:border-slate-700 dark:bg-slate-800">
+          {plate.hasGcode !== false && <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm overflow-x-auto dark:border-slate-700 dark:bg-slate-800">
             <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("print.weightByPart")}</h2>
             <table className="mt-3 w-full min-w-[420px] text-sm">
               <thead>
@@ -91,7 +98,7 @@ export default async function PrintDetailPage({
               <tbody>
                 {plate.categoryTotals.map((c) => (
                   <tr key={c.category} className="border-t border-slate-100 dark:border-slate-700">
-                    <td className="py-1.5 text-slate-600 dark:text-slate-300">{categoryLabel(c.category, lang)}</td>
+                    <td className="py-1.5 text-slate-600 dark:text-slate-300">{categoryLabel(c.category, lang, settings.customLanguagePacks)}</td>
                     {plate.filaments.map((f) => {
                       const mf = (plate.categoryByFilament ?? []).find(
                         (x) => x.filamentId === f.filamentId
@@ -125,9 +132,9 @@ export default async function PrintDetailPage({
             {!print.manual && <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
               {t("print.weightEstimateNote")}
             </p>}
-          </section>
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          {plate.hasGcode !== false && <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
             <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("print.objectsOnPlate")}</h2>
             <div className="mt-3 flex flex-col divide-y divide-slate-100 dark:divide-slate-700">
               {plate.objects.map((obj) => (
@@ -144,14 +151,14 @@ export default async function PrintDetailPage({
                     )}
                     {obj.categories.map((c) => (
                       <span key={c.category}>
-                        {categoryLabel(c.category, lang)}: {formatGrams(c.grams)}
+                        {categoryLabel(c.category, lang, settings.customLanguagePacks)}: {formatGrams(c.grams)}
                       </span>
                     ))}
                   </div>
                 </div>
               ))}
             </div>
-          </section>
+          </section>}
 
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
             <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("print.filamentsColors")}</h2>
@@ -175,7 +182,7 @@ export default async function PrintDetailPage({
           <ExtraCostsCard accessoryMaterials={settings.accessoryMaterials} />
         </div>
 
-        <div>
+        <div className="min-w-0">
           <CostCalculator plate={plate} settings={settings} />
           <InvoiceExport print={print} settings={settings} />
           <InvoiceExport print={print} settings={settings} kind="quote" />

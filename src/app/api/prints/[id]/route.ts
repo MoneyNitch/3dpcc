@@ -10,6 +10,8 @@ import {
 import { readPrintImage } from "@/lib/printImage";
 import { manualBreakdown, parseManualCategories, parseManualFilaments } from "@/lib/manualPrint";
 import { getPreviewQueue } from "@/lib/previewQueue";
+import { z } from "zod";
+import { externalSpoolSchema } from "@/lib/externalFilaments";
 
 export async function GET(
   _req: NextRequest,
@@ -84,6 +86,10 @@ export async function PUT(
     await savePrint({ ...print, plate: { ...print.plate, ...plate,
       ...(manualFilaments ? { filaments: manualFilaments } : {}), ...breakdown, thumbnailBase64 } });
     return NextResponse.json({ ok: true });
+  }
+  if (body.externalSpools !== undefined &&
+    !z.record(z.string(), externalSpoolSchema).safeParse(body.externalSpools).success) {
+    return NextResponse.json({ error: "Ungültige externe Spulenauswahl." }, { status: 400 });
   }
   await savePrintCostInputs(id, body);
   return NextResponse.json({ ok: true });

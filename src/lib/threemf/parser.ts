@@ -88,6 +88,18 @@ interface SliceInfo {
   filaments: RawFilament[];
 }
 
+function toFilamentUsage(filament: RawFilament): FilamentUsage {
+  return {
+    filamentId: filament.filamentId,
+    type: filament.type,
+    color: filament.color,
+    usedGramsTotal: filament.usedGramsTotal,
+    usedMetersTotal: filament.usedMetersTotal,
+    usedForObject: filament.usedForObject,
+    usedForSupport: filament.usedForSupport,
+  };
+}
+
 /** "; filament_ids = GFA00;GFB00;..." -> tray_info_idx per physical T-slot (0-based). */
 function parseTraySlotMap(gcode: string): string[] {
   const match = /^\s*;\s*filament_ids\s*=\s*([^\r\n]+)/m.exec(gcode);
@@ -183,8 +195,11 @@ export function* geometrySteps(buffer: Buffer): Generator<void, ModelGeometry | 
     const entry = findEntry(zip, (name) => /plate_\d+\.gcode$/.test(name));
     return entry ? yield* gcodeGeometrySteps(entry.getData().toString("utf-8")) : null;
   }
+  const toolpathGeometry = yield* toolpathFallback();
+  if (toolpathGeometry) return toolpathGeometry;
+
   const modelEntry = findEntry(zip, (name) => /^3d\/3dmodel\.model$/i.test(name));
-  if (!modelEntry) return yield* toolpathFallback();
+  if (!modelEntry) return null;
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
   const model = parser.parse(modelEntry.getData().toString("utf-8"))?.model;
@@ -234,7 +249,7 @@ export function* geometrySteps(buffer: Buffer): Generator<void, ModelGeometry | 
   }
 
   for (const item of roots) appendObject(item.objectid, [parseTransform(item.transform)], new Set(), 0);
-  return geometry.colors.length && !limitReached ? geometry : yield* toolpathFallback();
+  return geometry.colors.length && !limitReached ? geometry : null;
 }
 
 export async function parse3mf(buffer: Buffer, fileName: string): Promise<ParsedPrint> {
@@ -247,13 +262,64 @@ export async function parse3mf(buffer: Buffer, fileName: string): Promise<Parsed
     (n) => /plate_\d+\.png$/.test(n) && !n.includes("small") && !n.includes("no_light")
   );
 
-  if (!sliceInfoEntry || !gcodeEntry) {
+  if (!sliceInfoEntry) {
     throw new Error(
-      "Diese Datei enthält keine unterstützten Bambu Studio / OrcaSlicer Slicing-Metadaten (slice_info.config / plate_*.gcode)."
+      "Diese Datei enthält keine unterstützten Bambu Studio / OrcaSlicer Slicing-Metadaten (slice_info.config)."
     );
   }
 
   const sliceInfo = parseSliceInfoConfig(sliceInfoEntry.getData().toString("utf-8"));
+  if (!gcodeEntry) {
+    const filaments = sliceInfo.filaments.map(toFilamentUsage);
+    const totalWeightGrams =
+      sliceInfo.plateWeight ?? filaments.reduce((sum, filament) => sum + filament.usedGramsTotal, 0);
+    const printTimeSeconds = sliceInfo.predictionSeconds ?? 0;
+    const filamentWeightGrams = filaments.reduce((sum, filament) => sum + filament.usedGramsTotal, 0);
+    if (
+      !Number.isFinite(totalWeightGrams) ||
+      totalWeightGrams <= 0 ||
+      !Number.isFinite(filamentWeightGrams) ||
+      filamentWeightGrams <= 0 ||
+      !Number.isFinite(printTimeSeconds) ||
+      printTimeSeconds <= 0 ||
+      filaments.length === 0 ||
+      filaments.some((filament) => !Number.isFinite(filament.usedGramsTotal) || filament.usedGramsTotal < 0)
+    ) {
+      throw new Error(
+        "Diese 3MF-Datei enthält keinen G-Code und nicht genügend Slicing-Metadaten für eine Kostenberechnung (Filamentgewicht und Druckzeit erforderlich)."
+      );
+    }
+
+    const thumbnailBase64 = thumbEntry
+      ? `data:image/png;base64,${thumbEntry.getData().toString("base64")}`
+      : null;
+    return {
+      id: randomUUID(),
+      fileName,
+      displayName: fileName,
+      createdAt: new Date().toISOString(),
+      plate: {
+        totalWeightGrams,
+        printTimeSeconds,
+        totalPrintTimeSeconds: printTimeSeconds,
+        layerCount: 0,
+        nozzleDiameterMm: null,
+        printerModelId: sliceInfo.printerModelId,
+        bedType: null,
+        hasGcode: false,
+        filaments,
+        objects: [],
+        categoryTotals: [],
+        categoryByFilament: filaments.map((filament) => ({
+          filamentId: filament.filamentId,
+          categories: [],
+          totalGrams: filament.usedGramsTotal,
+        })),
+        thumbnailBase64,
+      },
+    };
+  }
+
   const gcode = gcodeEntry.getData().toString("utf-8");
   const header = parseGcodeHeader(gcode);
   const analysis = analyzeGcode(gcode);
@@ -281,9 +347,7 @@ export async function parse3mf(buffer: Buffer, fileName: string): Promise<Parsed
           usedForSupport: false,
           trayInfoIdx: "",
         }));
-  const filaments: FilamentUsage[] = rawFilaments.map(
-    ({ trayInfoIdx: _trayInfoIdx, ...f }) => f
-  );
+  const filaments = rawFilaments.map(toFilamentUsage);
 
   // Resolve gcode T-slot (physical AMS tray) -> slicer filament id via tray_info_idx.
   const trayIdxToFilamentId = new Map(rawFilaments.map((f) => [f.trayInfoIdx, f.filamentId]));
@@ -406,6 +470,7 @@ export async function parse3mf(buffer: Buffer, fileName: string): Promise<Parsed
     nozzleDiameterMm: null,
     printerModelId: sliceInfo.printerModelId,
     bedType: null,
+    hasGcode: true,
     filaments,
     objects,
     categoryTotals,

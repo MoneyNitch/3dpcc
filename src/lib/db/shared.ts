@@ -1,5 +1,6 @@
 import type { AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, ParsedPrint, PrintCostInputs } from "../types";
 import { randomUUID } from "../clientId";
+import { isCurrencyCode } from "../currency";
 
 /** Storage backend contract implemented by each supported database driver. */
 export interface DataStore {
@@ -82,6 +83,7 @@ export const defaultSettings: AppSettings = {
     enable3dPreview: true,
     previewComputePercent: 25,
   },
+  customLanguagePacks: [],
   numbering: {
     invoice: { prefix: "R", nextNumber: 1, digits: 4 },
     quote: { prefix: "A", nextNumber: 1, digits: 4 },
@@ -107,11 +109,20 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (result.general.enable3dPreview === undefined) {
     result = { ...result, general: { ...result.general, enable3dPreview: defaultSettings.general.enable3dPreview } };
   }
+  if (result.general.language === undefined) {
+    result = { ...result, general: { ...result.general, language: defaultSettings.general.language } };
+  }
   if (result.general.previewComputePercent === undefined) {
     result = { ...result, general: { ...result.general, previewComputePercent: defaultSettings.general.previewComputePercent } };
   }
+  if (!isCurrencyCode(result.general.currency)) {
+    result = { ...result, general: { ...result.general, currency: defaultSettings.general.currency } };
+  }
   if (!result.accessoryMaterials) {
     result = { ...result, accessoryMaterials: [] };
+  }
+  if (!result.customLanguagePacks) {
+    result = { ...result, customLanguagePacks: [] };
   }
   if (!result.invoiceTemplates) {
     result = { ...result, invoiceTemplates: defaultSettings.invoiceTemplates };

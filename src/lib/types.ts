@@ -1,5 +1,8 @@
 // Shared domain types for parsed 3MF prints and cost calculation.
 
+import type { Currency } from "./currency";
+import type { ExternalSpool } from "./externalFilaments";
+
 export type PartCategory = "model" | "support" | "tower" | "other";
 
 export interface FilamentUsage {
@@ -43,6 +46,8 @@ export interface ParsedPlate {
   nozzleDiameterMm: number | null;
   printerModelId: string | null;
   bedType: string | null;
+  /** False when the source 3MF contains slicer metadata but no G-code. */
+  hasGcode?: boolean;
   filaments: FilamentUsage[];
   objects: ObjectBreakdown[];
   /** Aggregated grams per category across all objects + wipe tower */
@@ -170,6 +175,7 @@ export interface AppSettings {
   defaultPrinterId: string;
   costs: CostSettings;
   general: GeneralSettings;
+  customLanguagePacks: LanguagePack[];
   numbering: {
     invoice: DocumentNumberingSettings;
     quote: DocumentNumberingSettings;
@@ -178,9 +184,15 @@ export interface AppSettings {
   setupCompleted: boolean;
 }
 
-export type Language = "de" | "en";
-export type Currency = "EUR" | "USD";
+export type Language = string;
+export type { Currency };
 export type Theme = "light" | "dark";
+
+export interface LanguagePack {
+  code: string;
+  name: string;
+  translations: Record<string, string>;
+}
 
 export interface PreviewQueueEntry {
   id: string;
@@ -230,6 +242,8 @@ export interface PrintCostInputs {
   vatPercent: number;
   /** Override price per kg per filamentId, falls back to matched material or a default */
   materialPriceOverrides: Record<string, number>;
+  /** Read-only external spool snapshots; existing calculations do not require a live connection. */
+  externalSpools: Record<string, ExternalSpool>;
   quantity: number;
   /** Measured total energy consumption (e.g. from a smart plug), in kWh. Overrides
    *  the power/print-time based estimate when set. */

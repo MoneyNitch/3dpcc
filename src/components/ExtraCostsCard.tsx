@@ -4,12 +4,12 @@ import { useState } from "react";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
-import { currencySymbol } from "@/lib/i18n";
+import { currencySymbol, getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
 import type { AccessoryMaterial } from "@/lib/types";
 import { Modal } from "./Modal";
 
 export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: AccessoryMaterial[] }) {
-  const { inputs, update, save, saved } = useCostInputs();
+  const { inputs, update, save, saved, saveError } = useCostInputs();
   const { t, money, currency, lang } = useLocale();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [name, setName] = useState("");
@@ -21,14 +21,14 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
     if (!item) return;
     setName(item.name);
     setCost(
-      new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", {
+      new Intl.NumberFormat(getIntlLocale(lang), {
         maximumFractionDigits: 4,
       }).format(item.pricePerPack / Math.max(1, item.unitsPerPack))
     );
   }
 
   function addItem() {
-    const parsedCost = parseFloat(lang === "de" ? cost.replace(",", ".") : cost);
+    const parsedCost = parseLocalizedNumber(cost, lang);
     const parsedQuantity = parseInt(quantity, 10);
     if (!name.trim() || !Number.isFinite(parsedCost)) return;
     update("extraCosts", [
@@ -121,6 +121,7 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
       >
         {saved ? t("extra.saved") : t("extra.save")}
       </button>
+      {saveError && <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">{t("cost.saveError")}</p>}
 
       {isModalOpen && (
         <Modal title={t("extra.modalTitle")} onClose={() => setIsModalOpen(false)}>
@@ -154,7 +155,7 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                {t("extra.costPerUnit")} ({currencySymbol(currency)})
+                {t("extra.costPerUnit")} ({currencySymbol(currency, lang)})
                 <input
                   type="text"
                   inputMode="decimal"

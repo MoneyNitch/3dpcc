@@ -14,10 +14,10 @@ export default async function QuotesPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          {translate(lang, "quote.builderTitle")}
+          {translate(lang, "quote.builderTitle", undefined, settings.customLanguagePacks)}
         </h1>
         <p className="mt-1 text-slate-500 dark:text-slate-400">
-          {translate(lang, "quote.builderSubtitle")}
+          {translate(lang, "quote.builderSubtitle", undefined, settings.customLanguagePacks)}
         </p>
       </div>
       <InvoiceTemplateBuilder

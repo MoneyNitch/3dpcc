@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.6.0 — External filament services, language packs and support export
+
+### Added
+- **External filament database connections** for Spoolman and FilaMan System,
+  including connection testing, encrypted API-key storage, and per-filament
+  spool selection in the cost calculator.
+- **Custom language packs**: download a translation template, import or replace
+  a JSON pack, and use the added language throughout the application. Missing
+  translations fall back to English.
+- **Support ZIP export** with app, runtime, browser and selected configuration
+  diagnostics, plus an optional issue description and reproduction steps.
+- **Optional browser error collection** for JavaScript errors and unhandled
+  promise rejections while Settings is open. Logs remain in memory until export,
+  are opt-in, and can be reviewed before inclusion.
+
+### Changed
+- Number, currency and date formatting now supports custom language codes.
+- Settings validation and migrations preserve compatibility with existing
+  settings when custom language packs are not present.
+
+### Fixed
+- Added the missing printer button translation in German and English.
+
 ## v0.5.1 — Preview queue management
 
 ### Added

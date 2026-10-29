@@ -34,3 +34,22 @@ test("migrates settings predating the general section", () => {
   const settings = migrateSettings({ ...defaultSettings, general: undefined });
   assert.deepEqual(settings.general, defaultSettings.general);
 });
+
+test("preserves supported currencies and repairs invalid currency settings", () => {
+  const supported = migrateSettings({
+    ...defaultSettings,
+    general: { ...defaultSettings.general, currency: "XCG" },
+  });
+  assert.equal(supported.general.currency, "XCG");
+
+  const invalid = migrateSettings({
+    ...defaultSettings,
+    general: { ...defaultSettings.general, currency: "NOT_A_CURRENCY" },
+  });
+  assert.equal(invalid.general.currency, defaultSettings.general.currency);
+});
+
+test("migrates settings without custom language packs", () => {
+  const settings = migrateSettings({ ...defaultSettings, customLanguagePacks: undefined });
+  assert.deepEqual(settings.customLanguagePacks, []);
+});

@@ -1,4 +1,4 @@
-import type { Language } from "./types";
+import type { Language, LanguagePack } from "./types";
 import { translate } from "./i18n";
 
 export function formatGrams(g: number): string {
@@ -12,7 +12,7 @@ export function formatDuration(seconds: number): string {
   return `${h} h ${m} min`;
 }
 
-export function categoryLabel(category: string, lang: Language): string {
+export function categoryLabel(category: string, lang: Language, languagePacks: LanguagePack[] = []): string {
   const key = `category.${category}` as Parameters<typeof translate>[1];
-  return translate(lang, key);
+  return translate(lang, key, undefined, languagePacks);
 }

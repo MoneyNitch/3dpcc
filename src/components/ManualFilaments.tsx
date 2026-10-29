@@ -1,6 +1,7 @@
 "use client";
 
 import { useLocale } from "@/lib/locale";
+import { getIntlLocale } from "@/lib/i18n";
 import type { Material } from "@/lib/types";
 
 export interface FilamentDraft {
@@ -73,7 +74,7 @@ export function ManualFilaments({ items, onChange, materials }: {
       <button type="button" disabled={items.length >= 32} onClick={() => onChange([...items, { filamentId: crypto.randomUUID(), type: materials[0]?.type ?? "PLA", color: materials[0]?.color ?? "#ffffff", weight: "", supportWeight: "", towerWeight: "", otherWeight: "" }])} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:border-orange-400 dark:border-slate-600 disabled:opacity-40">
         {t("manual.addFilament")}
       </button>
-      <p className="text-sm text-slate-500 dark:text-slate-400">{t("print.totalWeight")}: {manualFilamentPayload(items).filaments.reduce((sum, item) => sum + (item.usedGramsTotal || 0), 0).toLocaleString(lang === "de" ? "de-DE" : "en-US")} g</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400">{t("print.totalWeight")}: {manualFilamentPayload(items).filaments.reduce((sum, item) => sum + (item.usedGramsTotal || 0), 0).toLocaleString(getIntlLocale(lang))} g</p>
     </div>
   );
 }

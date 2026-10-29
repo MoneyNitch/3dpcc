@@ -1,9 +1,17 @@
 import Link from "next/link";
-import type { Language, ParsedPrint } from "@/lib/types";
+import type { Language, LanguagePack, ParsedPrint } from "@/lib/types";
 import { formatDuration, formatGrams } from "@/lib/format";
 import { translate } from "@/lib/i18n";
 
-export function PrintCard({ print, lang }: { print: ParsedPrint; lang: Language }) {
+export function PrintCard({
+  print,
+  lang,
+  languagePacks,
+}: {
+  print: ParsedPrint;
+  lang: Language;
+  languagePacks: LanguagePack[];
+}) {
   const { plate } = print;
   return (
     <Link
@@ -25,7 +33,7 @@ export function PrintCard({ print, lang }: { print: ParsedPrint; lang: Language 
         <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
           <span>⚖️ {formatGrams(plate.totalWeightGrams)}</span>
           <span>⏱️ {formatDuration(plate.totalPrintTimeSeconds)}</span>
-          <span>🎨 {plate.filaments.length} {translate(lang, "printCard.filaments")}</span>
+          <span>🎨 {plate.filaments.length} {translate(lang, "printCard.filaments", undefined, languagePacks)}</span>
         </div>
         <div className="mt-2 flex gap-1">
           {plate.filaments.map((f, i) => (

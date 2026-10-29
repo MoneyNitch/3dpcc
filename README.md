@@ -10,6 +10,16 @@ tower and total) and multi-color information, and calculates print costs.
 > under active development, so errors, missing features, or incomplete
 > functionality may occur. Feedback and suggestions are welcome. This is my first open-source project, and I also plan to program a large part of it using AI, since I wanted to test it out. 
 
+## Screenshots
+
+### Print overview
+
+![3D-PCC print overview showing the upload area and saved prints](./img/home.png)
+
+### Print details and cost calculator
+
+![3D-PCC print details with the interactive preview and cost calculator](./img/costcalc.png)
+
 ## Features
 
 - Drag-and-drop upload of `.gcode.3mf` files on desktop and mobile
@@ -19,6 +29,8 @@ tower and total) and multi-color information, and calculates print costs.
 - Cost calculator for material, electricity, machine wear, labor, packaging,
   profit margin and tax
 - Configurable material prices, printer profiles and cost settings
+- Read-only Spoolman and FilaMan System connections with per-filament spool
+  selection in the cost calculator
 - Interactive 3D preview: embedded model meshes when available, otherwise a
   complete G-code toolpath preview (including XY arcs), rendered using WebGL2
   as solid filament strands with slicer-provided widths and layer heights.
@@ -71,6 +83,50 @@ the worker automatically into `.preview-worker/`. When deploying outside Docker,
 deploy this directory alongside the built app and its Node dependencies; do not
 run `next build` directly instead of the npm build command.
 
+### External filament databases: Spoolman and FilaMan
+
+In the **Settings > External filament databases** tab, enter the server base URL for
+Spoolman (for example `http://192.168.1.10:7912`) and/or
+[FilaMan System](https://github.com/Fire-Devils/filaman-system) (for example
+`http://192.168.1.10:8083`). The address must be reachable **from the 3D-PCC
+server/container**, not just from your browser. Reverse-proxy base paths are
+supported; an optional trailing `/api/v1` is removed automatically.
+
+FilaMan requires a **user API key** created in FilaMan with spool read access
+(`Authorization: ApiKey ...`), not an ESP32/device token. Spoolman normally needs
+no key; an optional key is sent as a Bearer token for compatible reverse proxies.
+Connections are tested before saving. Clear the address and save to disconnect.
+API keys are encrypted with AES-256-GCM in `data/filament-config.json` using the
+same local `data/.dbkey` as database passwords. Saved keys are never returned
+to the browser. Blank key fields keep the existing key only for the same URL;
+changing servers requires re-entering it. Back up the configuration and key
+together, and keep them on persistent storage even with PostgreSQL/MySQL.
+
+Use trusted services on your private network and HTTPS when connecting over
+untrusted networks. Credentials in URLs and HTTP redirects are not supported.
+This local app does not provide a public-network authentication boundary.
+
+In a print's **Cost calculator**, choose **Load / refresh spools**, then select
+a spool for each filament. Active (non-archived) spools include material, color,
+remaining weight, and price per kg when available. Spool purchase prices take
+precedence over filament catalog prices. The kilogram price uses the original
+net filament weight, **not the remaining weight**; FilaMan's initial gross weight
+is reduced by its empty-spool weight. Missing price or weight is shown explicitly:
+enter a manual kilogram price in that case. External and local prices must use
+the same currency; there is no exchange-rate conversion.
+
+Save the costs to persist the selected spool and price snapshot. Saved prints
+and invoice calculations do not require a live connection and do not silently
+change when an external price changes. Load the inventory and choose **Use current
+spool price** to explicitly update a selection. A manual price override remains
+possible. Local materials and their prices are not imported or modified.
+**No filament consumption or stock changes are sent to either service.**
+
+The integration uses Spoolman's `/api/v1/spool` list and FilaMan System's
+paginated `/api/v1/spools` API. Results are limited to 10,000 spools per service,
+5 MB per response, and a 10-second timeout per request. Errors are shown per
+service, so a failure does not prevent selecting spools from the other one.
+
 ## Roadmap
 
 - Use projects from BambuStudio and OrcaSlicer for calculations.
@@ -92,6 +148,39 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Custom language packs
+
+Open **Settings → General**, download the translation template, edit its
+language code, display name, and translated values, then upload the JSON file.
+Save settings and select the new language to apply it. Missing translations
+fall back to English. Uploading a pack with the same language code replaces it.
+Keep placeholders such as `{count}` unchanged in translated values.
+
+Language pack format:
+
+```json
+{
+  "code": "fr",
+  "name": "Français",
+  "translations": {
+    "nav.prints": "Impressions",
+    "nav.settings": "Paramètres"
+  }
+}
+```
+
+### Support report
+
+Use the **Support export** tab in Settings to download a ZIP containing
+`diagnostics.json` and `browser-errors.json`. It includes app/runtime versions,
+browser details, selected configuration flags and counts, plus the issue
+description and reproduction steps you enter. Browser errors and unhandled
+promise rejections are collected in memory only while the Settings page is
+open; include them with the unchecked-by-default option and review the captured
+messages and stacks before exporting. They are sent only to the app itself to
+build the ZIP, not to an external support service. The export excludes
+credentials, service URLs, print files, and print names.
 
 ### Access from a mobile device
 
@@ -280,7 +369,7 @@ DB_DRIVER=sqlite
 Required tables are created automatically on first startup. Restart the
 development or production server after changing `.env.local`.
 
-The database can also be configured in **Settings > Database** without a
+The database can also be configured in its own **Settings > Database** tab without a
 server restart. The connection is tested before saving. The password is
 encrypted in `data/db-config.json`, with the key stored in `data/.dbkey`; both
 files are local and excluded from Git.

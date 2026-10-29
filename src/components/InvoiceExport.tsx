@@ -5,6 +5,7 @@ import { calculateCost } from "@/lib/costCalculator";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { formatDuration } from "@/lib/format";
 import { formatDocumentNumber, renderInvoiceHtml } from "@/lib/invoice";
+import { getIntlLocale } from "@/lib/i18n";
 import { useLocale } from "@/lib/locale";
 import type { AppSettings, ParsedPrint } from "@/lib/types";
 import { Modal } from "./Modal";
@@ -55,7 +56,7 @@ export function InvoiceExport({
     if (!template) return null;
 
     const result = calculateCost(print.plate, settings, inputs);
-    const locale = lang === "en" ? "en-US" : "de-DE";
+    const locale = getIntlLocale(lang);
     const asDate = (value: string) => (value ? new Date(value).toLocaleDateString(locale) : "");
 
     const values: Record<string, string> = {

@@ -3,6 +3,8 @@ import { getDbConfigView } from "@/lib/dbConfig";
 import { translate } from "@/lib/i18n";
 import { SettingsForm } from "@/components/SettingsForm";
 import { DatabaseSettingsForm } from "@/components/DatabaseSettingsForm";
+import { FilamentConnectionSettings } from "@/components/FilamentConnectionSettings";
+import { getFilamentConnectionsView } from "@/lib/filamentConfig";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,8 @@ export default async function SettingsPage() {
   const settings = await getSettings();
   const dbConfig = getDbConfigView();
   const lang = settings.general.language;
-  const t = (key: Parameters<typeof translate>[1]) => translate(lang, key);
+  const t = (key: Parameters<typeof translate>[1]) =>
+    translate(lang, key, undefined, settings.customLanguagePacks);
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -27,8 +30,11 @@ export default async function SettingsPage() {
           </p>
         </div>
       )}
-      <DatabaseSettingsForm initialConfig={dbConfig} />
-      <SettingsForm initialSettings={settings} />
+      <SettingsForm
+        initialSettings={settings}
+        databaseSettings={<DatabaseSettingsForm initialConfig={dbConfig} />}
+        filamentSettings={<FilamentConnectionSettings initialConnections={getFilamentConnectionsView()} />}
+      />
     </div>
   );
 }

@@ -14,10 +14,10 @@ export default async function InvoicesPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          {translate(lang, "invoice.builderTitle")}
+          {translate(lang, "invoice.builderTitle", undefined, settings.customLanguagePacks)}
         </h1>
         <p className="mt-1 text-slate-500 dark:text-slate-400">
-          {translate(lang, "invoice.builderSubtitle")}
+          {translate(lang, "invoice.builderSubtitle", undefined, settings.customLanguagePacks)}
         </p>
       </div>
       <InvoiceTemplateBuilder initialSettings={settings} />

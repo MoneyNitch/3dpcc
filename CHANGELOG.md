@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.1 — Installation and support export fixes
+
+### Changed
+- The Windows installer now stops with an explicit error when `npm install`
+  fails instead of displaying a success message.
+- Documented the Python 3 and Visual Studio C++ Build Tools prerequisites for
+  compiling `better-sqlite3` on Windows.
+
+### Fixed
+- Fixed the production TypeScript build error when returning the support ZIP
+  from the API route by converting the Node.js buffer to a `Uint8Array`.
+
 ## v0.6.0 — External filament services, language packs and support export
 
 ### Added

@@ -21,9 +21,16 @@ if ($nodeMajor -lt $requiredMajor) {
 
 Write-Host "Using Node.js $nodeVersion"
 Push-Location $projectRoot
-Write-Host "Installing project dependencies..."
-npm install
-Pop-Location
+try {
+    Write-Host "Installing project dependencies..."
+    npm install
+    if ($LASTEXITCODE -ne 0) {
+        throw "Dependency installation failed (npm exit code $LASTEXITCODE). Review the error above and rerun this script."
+    }
+}
+finally {
+    Pop-Location
+}
 
 if ($Background) {
     $logDir = Join-Path $projectRoot 'logs'

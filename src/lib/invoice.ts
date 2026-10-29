@@ -139,34 +139,45 @@ async function renderElement(
   template: InvoiceTemplate,
   values: Record<string, string>,
   result: CostResult,
-  money: (value: number) => string
+  money: (value: number) => string,
+  positionItems?: InvoicePositionItem[],
+  positionLabels?: InvoicePositionLabels,
+  showQuantityDiscount?: boolean,
+  quantityDiscountLabel?: string,
 ): Promise<string> {
   const text = (value: string) => escapeHtml(fillVariables(value, values));
   const style = `position:absolute;left:${element.x}mm;top:${element.y}mm;width:${element.width}mm;height:${element.height}mm;font-size:${element.fontSize ?? 11}pt;text-align:${element.align ?? "left"};`;
+  const elementAttributes = `data-element-type="${element.type}" data-template-y="${element.y}" data-template-width="${element.width}" data-template-height="${element.height}"`;
 
   if (element.type === "text" || element.type === "variables") {
-    return `<div style="${style}" class="pre">${text(element.content ?? "")}</div>`;
+    return `<div ${elementAttributes} style="${style}" class="pre">${text(element.content ?? "")}</div>`;
   }
   if (element.type === "image") {
     const src = element.content ?? "";
     return src
-      ? `<div style="${style}"><img src="${escapeHtml(src)}" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></div>`
+      ? `<div ${elementAttributes} style="${style}"><img src="${escapeHtml(src)}" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></div>`
       : "";
   }
   if (element.type === "qrcode") {
     const value = fillVariables(element.content ?? "", values);
     if (!value) return "";
     const dataUrl = await QRCode.toDataURL(value, { margin: 0, width: 512 });
-    return `<div style="${style}"><img src="${dataUrl}" alt="QR" style="width:100%;height:100%;object-fit:contain"></div>`;
+    return `<div ${elementAttributes} style="${style}"><img src="${dataUrl}" alt="QR" style="width:100%;height:100%;object-fit:contain"></div>`;
   }
   if (element.type === "lineItems") {
+    if (positionItems) {
+      const rows = positionItems.map((item) =>
+        `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(String(item.quantity))}</td><td>${escapeHtml(money(item.unitPrice))}</td><td>${escapeHtml(money(item.amount))}</td></tr>`
+      ).join("");
+      return `<div ${elementAttributes} style="${style}" class="line-items"><table class="items"><thead><tr><th>${escapeHtml(positionLabels?.item ?? "Position")}</th><th>${escapeHtml(positionLabels?.quantity ?? "Menge")}</th><th>${escapeHtml(positionLabels?.unitPrice ?? "Einzelpreis")}</th><th>${escapeHtml(positionLabels?.total ?? "Gesamt")}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
     const rows = buildInvoiceLines(result, element)
       .map(
         (line) =>
           `<tr><td>${escapeHtml(line.label)}</td><td>${escapeHtml(money(line.amount))}</td></tr>`
       )
       .join("");
-    return `<div style="${style}"><table class="items"><thead><tr><th>Position</th><th>Betrag</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    return `<div ${elementAttributes} style="${style}" class="line-items"><table class="items"><thead><tr><th>Position</th><th>Betrag</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
   // totals
@@ -175,7 +186,9 @@ async function renderElement(
     (lineItemElement?.distributionTargets?.margin?.length ?? 0) > 0 || lineItemElement?.distributeMargin;
   const marginHidden = marginDistributed || (element.hiddenLines?.includes("margin") ?? false);
   const taxHidden = element.hiddenLines?.includes("tax") ?? false;
-  const subtotal = marginDistributed ? result.priceBeforeVat : result.subtotal;
+  const subtotal = marginDistributed
+    ? result.priceBeforeVat - (!showQuantityDiscount ? result.quantityDiscountAmount : 0)
+    : result.subtotal - (!showQuantityDiscount ? result.quantityDiscountAmount : 0);
   const marginRow = marginHidden
     ? ""
     : `<div><span>${escapeHtml(element.lineLabels?.margin || "Gewinnmarge")}</span><span>${escapeHtml(money(result.marginAmount))}</span></div>`;
@@ -183,8 +196,44 @@ async function renderElement(
   const taxRow = taxHidden
     ? ""
     : `<div><span>${taxLabel}</span><span>${escapeHtml(money(result.vatAmount))}</span></div>`;
+  const discountRow = showQuantityDiscount && result.quantityDiscountAmount > 0
+    ? `<div class="quantity-discount"><span>${escapeHtml(quantityDiscountLabel ?? "Mengenrabatt")} (${result.quantityDiscountPercent} %)</span><span>−${escapeHtml(money(result.quantityDiscountAmount))}</span></div>`
+    : "";
 
-  return `<div style="${style}"><div class="totals"><div><span>Zwischensumme</span><span>${escapeHtml(money(subtotal))}</span></div>${marginRow}${taxRow}<div class="total"><span>Gesamt</span><span>${escapeHtml(money(result.totalPrice))}</span></div></div></div>`;
+  return `<div ${elementAttributes} style="${style}"><div class="totals"><div><span>Zwischensumme</span><span>${escapeHtml(money(subtotal))}</span></div>${marginRow}${discountRow}${taxRow}<div class="total"><span>Gesamt</span><span>${escapeHtml(money(result.totalPrice))}</span></div></div></div>`;
+}
+
+export interface InvoicePositionItem {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+}
+
+export interface InvoicePositionLabels {
+  item: string;
+  quantity: string;
+  unitPrice: string;
+  total: string;
+}
+
+export function allocateInvoiceAmounts(totalAmount: number, shares: number[]): number[] {
+  if (shares.length === 0) return [];
+  const nonNegativeShares = shares.map((share) => Math.max(0, share));
+  const shareTotal = nonNegativeShares.reduce((total, share) => total + share, 0);
+  const weights = shareTotal > 0
+    ? nonNegativeShares.map((share) => share / shareTotal)
+    : shares.map(() => 1 / shares.length);
+  const totalCents = Math.round(totalAmount * 100);
+  let allocatedCents = 0;
+
+  return weights.map((weight, index) => {
+    const cents = index === weights.length - 1
+      ? totalCents - allocatedCents
+      : Math.round(totalCents * weight);
+    allocatedCents += cents;
+    return cents / 100;
+  });
 }
 
 /** Renders a complete invoice document for the given paper format. */
@@ -195,6 +244,10 @@ export async function renderInvoiceHtml({
   money,
   title = "Rechnung",
   autoPrint = false,
+  positionItems,
+  positionLabels,
+  showQuantityDiscount = true,
+  quantityDiscountLabel,
 }: {
   template: InvoiceTemplate;
   values: Record<string, string>;
@@ -202,16 +255,56 @@ export async function renderInvoiceHtml({
   money: (value: number) => string;
   title?: string;
   autoPrint?: boolean;
+  positionItems?: InvoicePositionItem[];
+  positionLabels?: InvoicePositionLabels;
+  showQuantityDiscount?: boolean;
+  quantityDiscountLabel?: string;
 }): Promise<string> {
   const size = pageSizeMm(template.paperFormat, template.orientation);
   const body = (
-    await Promise.all(template.elements.map((element) => renderElement(element, template, values, result, money)))
+    await Promise.all(template.elements.map((element) =>
+      renderElement(
+        element,
+        template,
+        values,
+        result,
+        money,
+        positionItems,
+        positionLabels,
+        showQuantityDiscount,
+        quantityDiscountLabel
+      )
+    ))
   ).join("");
+  const layoutScript = `<script>
+    (function () {
+      const lineItems = Array.from(document.querySelectorAll('.line-items'));
+      const elements = Array.from(document.querySelectorAll('[data-template-y]'));
+      const shifts = lineItems.map((container) => {
+        const table = container.querySelector('table');
+        if (!table) return { bottom: 0, overflow: 0 };
+        const widthMm = Number(container.dataset.templateWidth);
+        const heightMm = Number(container.dataset.templateHeight);
+        const pixelsPerMm = container.getBoundingClientRect().width / widthMm;
+        const tableHeight = table.getBoundingClientRect().height;
+        return {
+          bottom: Number(container.dataset.templateY) + heightMm,
+          overflow: Math.max(0, tableHeight - container.getBoundingClientRect().height) / pixelsPerMm
+        };
+      });
+      for (const element of elements) {
+        const originalY = Number(element.dataset.templateY);
+        const shift = shifts.reduce((total, item) =>
+          total + (originalY >= item.bottom ? item.overflow : 0), 0);
+        if (shift > 0) element.style.top = (originalY + shift) + 'mm';
+      }
+    })();
+  <\/script>`;
   const printScript = autoPrint
-    ? '<script>window.addEventListener("load", function () { window.print(); });<\/script>'
+    ? '<script>window.addEventListener("load", function () { window.requestAnimationFrame(function () { window.print(); }); });<\/script>'
     : "";
 
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#172033;background:#fff;margin:0}@page{size:${size.width}mm ${size.height}mm;margin:0}.page{position:relative;width:${size.width}mm;height:${size.height}mm;margin:0 auto;background:#fff}.pre{white-space:pre-line}.items{width:100%;border-collapse:collapse}.items th,.items td{border-bottom:1px solid #d7dce5;padding:6px;text-align:left;font-size:10pt}.items th:last-child,.items td:last-child{text-align:right}.totals div{display:flex;justify-content:space-between;padding:3px 0;font-size:10pt}.totals .total{border-top:2px solid #172033;margin-top:4px;padding-top:6px;font-size:13pt;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><div class="page">${body}</div>${printScript}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#172033;background:#fff;margin:0}@page{size:${size.width}mm ${size.height}mm;margin:0}.page{position:relative;width:${size.width}mm;height:${size.height}mm;margin:0 auto;background:#fff}.pre{white-space:pre-line}.items{width:100%;border-collapse:collapse}.items th,.items td{border-bottom:1px solid #d7dce5;padding:2px 6px;text-align:left;font-size:8.5pt;line-height:1.1}.items th:last-child,.items td:last-child{text-align:right}.items tr{break-inside:avoid;page-break-inside:avoid}.totals div{display:flex;justify-content:space-between;padding:3px 0;font-size:10pt}.totals .total{border-top:2px solid #172033;margin-top:4px;padding-top:6px;font-size:13pt;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><div class="page">${body}</div>${layoutScript}${printScript}</body></html>`;
 }
 
 
@@ -249,6 +342,8 @@ export const sampleInvoiceResult: CostResult = {
   subtotal: 12,
   marginAmount: 3,
   priceBeforeVat: 15,
+  quantityDiscountAmount: 0,
+  quantityDiscountPercent: 0,
   vatAmount: 2.85,
   totalPrice: 17.85,
   pricePerGram: 0.21,

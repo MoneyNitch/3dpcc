@@ -13,6 +13,7 @@ export function PrintCard({
   languagePacks: LanguagePack[];
 }) {
   const { plate } = print;
+  const plates = print.plates ?? [plate];
   return (
     <Link
       href={`/prints/${print.id}`}
@@ -31,8 +32,9 @@ export function PrintCard({
           {print.displayName ?? print.fileName}
         </p>
         <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
-          <span>⚖️ {formatGrams(plate.totalWeightGrams)}</span>
-          <span>⏱️ {formatDuration(plate.totalPrintTimeSeconds)}</span>
+          <span>⚖️ {formatGrams(plates.reduce((total, item) => total + item.totalWeightGrams, 0))}</span>
+          <span>⏱️ {formatDuration(plates.reduce((total, item) => total + item.totalPrintTimeSeconds, 0))}</span>
+          {plates.length > 1 && <span>{translate(lang, "print.plateCount", { count: plates.length }, languagePacks)}</span>}
           <span>🎨 {plate.filaments.length} {translate(lang, "printCard.filaments", undefined, languagePacks)}</span>
         </div>
         <div className="mt-2 flex gap-1">

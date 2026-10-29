@@ -26,6 +26,59 @@ import { SupportExport } from "./SupportExport";
 
 type SettingsTab = "general" | "support" | "database" | "filaments" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
 
+type ImportedPrinterProfile = Omit<PrinterProfile, "id">;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parsePrinterProfileExport(value: unknown): ImportedPrinterProfile[] | null {
+  if (
+    !isRecord(value)
+    || value.format !== "3dpcc-printer-profiles"
+    || value.version !== 1
+    || !Array.isArray(value.printers)
+    || value.printers.length === 0
+    || value.printers.length > 100
+  ) {
+    return null;
+  }
+
+  const printers: ImportedPrinterProfile[] = [];
+  for (const item of value.printers) {
+    if (!isRecord(item)) return null;
+    const { name, powerConsumptionW, purchasePrice, lifetimeHours, maintenanceCostPerHour } = item;
+    if (
+      typeof name !== "string"
+      || !name.trim()
+      || typeof powerConsumptionW !== "number"
+      || !Number.isFinite(powerConsumptionW)
+      || powerConsumptionW < 0
+      || typeof purchasePrice !== "number"
+      || !Number.isFinite(purchasePrice)
+      || purchasePrice < 0
+      || typeof lifetimeHours !== "number"
+      || !Number.isFinite(lifetimeHours)
+      || lifetimeHours <= 0
+      || typeof maintenanceCostPerHour !== "number"
+      || !Number.isFinite(maintenanceCostPerHour)
+      || maintenanceCostPerHour < 0
+    ) {
+      return null;
+    }
+
+    printers.push({
+      name: name.trim(),
+      powerConsumptionW,
+      purchasePrice,
+      lifetimeHours,
+      maintenanceCostPerHour,
+    });
+  }
+
+  return printers;
+}
+
 export function SettingsForm({ initialSettings, databaseSettings, filamentSettings }: {
   initialSettings: AppSettings;
   databaseSettings: ReactNode;
@@ -38,6 +91,10 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
   const [saveError, setSaveError] = useState(false);
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
   const [printerSaved, setPrinterSaved] = useState(false);
+  const [printerProfilesMessage, setPrinterProfilesMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [languagePackMessage, setLanguagePackMessage] = useState<{
     type: "success" | "error";
@@ -54,15 +111,15 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     parseLocalizedNumber(value, lang) || 0;
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "general", label: t("settings.general") },
-    { id: "support", label: t("support.title") },
-    { id: "database", label: t("db.title") },
-    { id: "filaments", label: t("filamentDb.title") },
-    { id: "queue", label: t("queue.title") },
     { id: "materials", label: t("settings.materials") },
-    { id: "accessories", label: t("settings.accessoryMaterials") },
     { id: "printers", label: t("settings.printers") },
-    { id: "numbering", label: t("settings.numbering") },
     { id: "costs", label: t("settings.costsTitle") },
+    { id: "accessories", label: t("settings.accessoryMaterials") },
+    { id: "numbering", label: t("settings.numbering") },
+    { id: "queue", label: t("queue.title") },
+    { id: "filaments", label: t("filamentDb.title") },
+    { id: "database", label: t("db.title") },
+    { id: "support", label: t("support.title") },
   ];
 
   function updateNumbering(kind: "invoice" | "quote", patch: Partial<AppSettings["numbering"]["invoice"]>) {
@@ -166,6 +223,63 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     });
     setSaved(false);
     setPrinterSaved(false);
+  }
+
+  function exportPrinterProfiles() {
+    const data = {
+      format: "3dpcc-printer-profiles",
+      version: 1,
+      printers: settings.printers.map(({ name, powerConsumptionW, purchasePrice, lifetimeHours, maintenanceCostPerHour }) => ({
+        name,
+        powerConsumptionW,
+        purchasePrice,
+        lifetimeHours,
+        maintenanceCostPerHour,
+      })),
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = lang === "de" ? "3dpcc-druckerprofile.json" : "3dpcc-printer-profiles.json";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  async function importPrinterProfiles(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (file.size > 1_000_000) {
+      setPrinterProfilesMessage({ type: "error", text: t("settings.printerProfilesTooLarge") });
+      return;
+    }
+
+    let importedProfiles: ImportedPrinterProfile[] | null;
+    try {
+      importedProfiles = parsePrinterProfileExport(JSON.parse(await file.text()));
+    } catch {
+      importedProfiles = null;
+    }
+
+    if (!importedProfiles) {
+      setPrinterProfilesMessage({ type: "error", text: t("settings.printerProfilesInvalid") });
+      return;
+    }
+
+    const printers = importedProfiles.map((profile) => ({ ...profile, id: randomUUID() }));
+    setSettings((current) => ({ ...current, printers: [...current.printers, ...printers] }));
+    setSelectedPrinterId(printers[0].id);
+    setSaved(false);
+    setPrinterSaved(false);
+    setPrinterProfilesMessage({
+      type: "success",
+      text: t("settings.printerProfilesImported", { count: printers.length }),
+    });
   }
 
   function setDefaultPrinter(id: string) {
@@ -359,6 +473,56 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
               ))}
             </select>
           </Field>
+        </div>
+        <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+          <h3 className="font-medium text-slate-800 dark:text-slate-100">{t("settings.invoiceSender")}</h3>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.invoiceSenderHelp")}</p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <Field label={t("settings.companyName")}>
+              <input
+                value={settings.general.companyName}
+                onChange={(event) => updateGeneral({ companyName: event.target.value })}
+                className={`w-full ${textInputClass}`}
+              />
+            </Field>
+            <Field label={t("settings.companyAddress")}>
+              <textarea
+                value={settings.general.companyAddress}
+                onChange={(event) => updateGeneral({ companyAddress: event.target.value })}
+                rows={3}
+                className={`w-full ${textInputClass}`}
+              />
+            </Field>
+            <Field label={t("settings.companyEmail")}>
+              <input
+                type="email"
+                value={settings.general.companyEmail}
+                onChange={(event) => updateGeneral({ companyEmail: event.target.value })}
+                className={`w-full ${textInputClass}`}
+              />
+            </Field>
+            <Field label={t("settings.companyPhone")}>
+              <input
+                value={settings.general.companyPhone}
+                onChange={(event) => updateGeneral({ companyPhone: event.target.value })}
+                className={`w-full ${textInputClass}`}
+              />
+            </Field>
+            <Field label={t("settings.companyTaxId")}>
+              <input
+                value={settings.general.companyTaxId}
+                onChange={(event) => updateGeneral({ companyTaxId: event.target.value })}
+                className={`w-full ${textInputClass}`}
+              />
+            </Field>
+            <Field label={t("settings.companyIban")}>
+              <input
+                value={settings.general.companyIban}
+                onChange={(event) => updateGeneral({ companyIban: event.target.value })}
+                className={`w-full ${textInputClass}`}
+              />
+            </Field>
+          </div>
         </div>
         <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
           <h3 className="font-medium text-slate-800 dark:text-slate-100">{t("settings.languagePacks")}</h3>
@@ -568,15 +732,46 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
         role="tabpanel"
         className={`${activeTab === "printers" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{t("settings.printers")}</h2>
-          <button
-            onClick={addPrinter}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
-          >
-            {t("settings.addPrinter")}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={exportPrinterProfiles}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              {t("settings.exportPrinterProfiles")}
+            </button>
+            <label className="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-orange-500 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700">
+              {t("settings.importPrinterProfiles")}
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={importPrinterProfiles}
+                className="sr-only"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={addPrinter}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              {t("settings.addPrinter")}
+            </button>
+          </div>
         </div>
+        {printerProfilesMessage && (
+          <p
+            role={printerProfilesMessage.type === "error" ? "alert" : "status"}
+            className={`mt-2 text-sm ${
+              printerProfilesMessage.type === "error"
+                ? "text-red-600 dark:text-red-400"
+                : "text-green-700 dark:text-green-400"
+            }`}
+          >
+            {printerProfilesMessage.text}
+          </p>
+        )}
 
         <Field label={t("settings.selectPrinter")}>
           <select

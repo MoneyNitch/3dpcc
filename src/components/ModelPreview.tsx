@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelGeometry } from "@/lib/types";
 import { useLocale } from "@/lib/locale";
 import { createToolpathRenderer } from "@/lib/toolpathRenderer";
 import { getToolpathLayerHeights } from "@/lib/toolpathLayers";
+import { usePlateSelection } from "@/lib/plateSelectionContext";
 
 type PreviewMode = "2d" | "3d";
 type ModelStatus = "idle" | "computing" | "buildError" | "ready" | "unavailable" | "error";
@@ -28,7 +29,7 @@ function colorWithLight(color: string, brightness: number): string {
 
 export function ModelPreview({
   printId,
-  thumbnail,
+  thumbnail: initialThumbnail,
   alt,
   allow3d,
 }: {
@@ -38,10 +39,30 @@ export function ModelPreview({
   allow3d: boolean;
 }) {
   const { t } = useLocale();
-  const [requestedMode, setMode] = useState<PreviewMode>(thumbnail ? "2d" : "3d");
-  const mode = allow3d ? requestedMode : "2d";
-  const [status, setStatus] = useState<ModelStatus>("idle");
-  const [geometry, setGeometry] = useState<ModelGeometry | null>(null);
+  const { plate } = usePlateSelection();
+  const thumbnail = plate.thumbnailBase64;
+  const plateIndex = plate.plateIndex;
+  const [requestedMode, setMode] = useState<PreviewMode>(initialThumbnail ? "2d" : "3d");
+  const mode = allow3d
+    ? requestedMode === "2d" && !thumbnail ? "3d" : requestedMode
+    : "2d";
+  const [plateStatus, setPlateStatus] = useState<{
+    plateIndex?: number;
+    status: ModelStatus;
+  } | null>(null);
+  const status = plateStatus && plateStatus.plateIndex === plateIndex
+    ? plateStatus.status
+    : "idle";
+  const setStatus = useCallback((nextStatus: ModelStatus) => {
+    setPlateStatus({ plateIndex, status: nextStatus });
+  }, [plateIndex]);
+  const [loadedGeometry, setLoadedGeometry] = useState<{
+    plateIndex?: number;
+    geometry: ModelGeometry;
+  } | null>(null);
+  const geometry = loadedGeometry && loadedGeometry.plateIndex === plateIndex
+    ? loadedGeometry.geometry
+    : null;
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [retryVersion, setRetryVersion] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -62,7 +83,8 @@ export function ModelPreview({
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     function poll() {
-      void fetch(`/api/prints/${encodeURIComponent(printId)}/model`, { signal: controller.signal })
+      const plateQuery = plateIndex === undefined ? "" : `?plateIndex=${plateIndex}`;
+      void fetch(`/api/prints/${encodeURIComponent(printId)}/model${plateQuery}`, { signal: controller.signal })
       .then(async (response) => {
         if (response.status === 202) {
           setStatus("computing");
@@ -93,7 +115,7 @@ export function ModelPreview({
               !values.every((value) => Number.isFinite(value) && value > 0)))) {
           throw new Error("Invalid model geometry");
         }
-        setGeometry(model);
+        setLoadedGeometry({ plateIndex, geometry: model });
         setStatus("ready");
       })
       .catch((error: unknown) => {
@@ -107,12 +129,13 @@ export function ModelPreview({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [mode, printId, geometry, retryVersion]);
+  }, [mode, printId, plateIndex, geometry, retryVersion, setStatus]);
 
   async function retryPreview() {
     setStatus("computing");
     try {
-      const response = await fetch(`/api/prints/${encodeURIComponent(printId)}/model`, { method: "POST" });
+      const plateQuery = plateIndex === undefined ? "" : `?plateIndex=${plateIndex}`;
+      const response = await fetch(`/api/prints/${encodeURIComponent(printId)}/model${plateQuery}`, { method: "POST" });
       if (!response.ok) throw new Error("Could not restart preview calculation.");
       setStatus("computing");
       setRetryVersion((version) => version + 1);
@@ -159,7 +182,7 @@ export function ModelPreview({
       renderer?.dispose();
       drawRef.current = () => {};
     };
-  }, [geometry, mode, status]);
+  }, [geometry, mode, status, setStatus]);
 
   useEffect(() => {
     drawRef.current();
@@ -364,6 +387,10 @@ export function ModelPreview({
         <div className="flex min-h-72 items-center justify-center bg-white p-3 dark:bg-slate-800">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={thumbnail} alt={alt} className="max-h-[360px] max-w-full object-contain" />
+        </div>
+      ) : mode === "2d" ? (
+        <div className="flex min-h-72 items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400" role="status">
+          {t("print.thumbnailUnavailable")}
         </div>
       ) : mode === "3d" && status === "ready" ? (
         <canvas

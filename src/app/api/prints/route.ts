@@ -73,7 +73,13 @@ export async function POST(req: NextRequest) {
     try {
       if (settings.general.enable3dPreview) {
         const queue = await getPreviewQueue();
-        await queue.enqueue(parsed.id, buffer);
+        await queue.enqueue(
+          parsed.id,
+          buffer,
+          (parsed.plates ?? [parsed.plate]).map((plate) => plate.plateIndex).filter(
+            (plateIndex): plateIndex is number => plateIndex !== undefined,
+          ),
+        );
         queue.start();
       }
     } catch (error) {

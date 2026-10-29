@@ -46,6 +46,8 @@ export function defaultCostInputs(settings: AppSettings): PrintCostInputs {
     packagingCost: settings.costs.packagingCost,
     marginPercent: settings.costs.marginPercent,
     vatPercent: settings.costs.vatPercent,
+    quantityDiscountThreshold: 5,
+    quantityDiscountPercent: 5,
     materialPriceOverrides: {},
     externalSpools: {},
     quantity: 1,
@@ -105,14 +107,7 @@ export function calculateCost(
 
   const packagingCost = inputs.packagingCost;
 
-  const subtotal =
-    materialTotal + extraCostsTotal + energyCost + machineCost + laborCost + packagingCost;
-  const marginAmount = subtotal * (inputs.marginPercent / 100);
-  const priceBeforeVat = subtotal + marginAmount;
-  const vatAmount = priceBeforeVat * (inputs.vatPercent / 100);
-  const totalPrice = (priceBeforeVat + vatAmount) * (inputs.quantity || 1);
-
-  return {
+  return finalizeCost(
     materialLines,
     materialTotal,
     extraCostsTotal,
@@ -120,11 +115,104 @@ export function calculateCost(
     machineCost,
     laborCost,
     packagingCost,
+    plate.totalWeightGrams,
+    inputs
+  );
+}
+
+export function calculateAllPlatesCost(
+  plates: ParsedPlate[],
+  settings: AppSettings,
+  inputs: PrintCostInputs
+): CostResult {
+  if (plates.length === 0) throw new Error("At least one plate is required to calculate total costs.");
+
+  const perPlateInputs = {
+    ...inputs,
+    energyKwhOverride: null,
+    laborMinutes: 0,
+    packagingCost: 0,
+    extraCosts: [],
+    quantity: 1,
+  };
+  const plateResults = plates.map((plate) => calculateCost(plate, settings, perPlateInputs));
+  const materialLines = plateResults.flatMap((result) => result.materialLines);
+  const materialTotal = plateResults.reduce((total, result) => total + result.materialTotal, 0);
+  const extraCostsTotal = (inputs.extraCosts ?? []).reduce(
+    (total, item) => total + item.cost * (item.quantity ?? 1),
+    0
+  );
+  const energyCost = inputs.energyKwhOverride !== null
+    ? inputs.energyKwhOverride * settings.costs.electricityPricePerKwh
+    : plateResults.reduce((total, result) => total + result.energyCost, 0);
+  const machineCost = plateResults.reduce((total, result) => total + result.machineCost, 0);
+  const laborCost = (inputs.laborMinutes / 60) * settings.costs.laborRatePerHour;
+  const packagingCost = inputs.packagingCost;
+  const totalWeightGrams = plates.reduce((total, plate) => total + plate.totalWeightGrams, 0);
+
+  return finalizeCost(
+    materialLines,
+    materialTotal,
+    extraCostsTotal,
+    energyCost,
+    machineCost,
+    laborCost,
+    packagingCost,
+    totalWeightGrams,
+    inputs
+  );
+}
+
+function finalizeCost(
+  materialLines: CostBreakdownLine[],
+  materialTotal: number,
+  extraCostsTotal: number,
+  energyCost: number,
+  machineCost: number,
+  laborCost: number,
+  packagingCost: number,
+  totalWeightGrams: number,
+  inputs: PrintCostInputs
+): CostResult {
+  const subtotal =
+    (materialTotal + extraCostsTotal + energyCost + machineCost + laborCost + packagingCost) *
+    (inputs.quantity || 1);
+  const scaledMaterialLines = materialLines.map((line) => ({
+    ...line,
+    amount: line.amount * (inputs.quantity || 1),
+  }));
+  const scaledMaterialTotal = materialTotal * (inputs.quantity || 1);
+  const scaledExtraCostsTotal = extraCostsTotal * (inputs.quantity || 1);
+  const scaledEnergyCost = energyCost * (inputs.quantity || 1);
+  const scaledMachineCost = machineCost * (inputs.quantity || 1);
+  const scaledLaborCost = laborCost * (inputs.quantity || 1);
+  const scaledPackagingCost = packagingCost * (inputs.quantity || 1);
+  const marginAmount = subtotal * (inputs.marginPercent / 100);
+  const priceBeforeVat = subtotal + marginAmount;
+  const discountThreshold = inputs.quantityDiscountThreshold ?? 5;
+  const configuredDiscountPercent = inputs.quantityDiscountPercent ?? 5;
+  const quantityDiscountPercent = inputs.quantity >= discountThreshold
+    ? Math.max(0, Math.min(100, configuredDiscountPercent))
+    : 0;
+  const quantityDiscountAmount = priceBeforeVat * (quantityDiscountPercent / 100);
+  const vatAmount = (priceBeforeVat - quantityDiscountAmount) * (inputs.vatPercent / 100);
+  const totalPrice = priceBeforeVat - quantityDiscountAmount + vatAmount;
+
+  return {
+    materialLines: scaledMaterialLines,
+    materialTotal: scaledMaterialTotal,
+    extraCostsTotal: scaledExtraCostsTotal,
+    energyCost: scaledEnergyCost,
+    machineCost: scaledMachineCost,
+    laborCost: scaledLaborCost,
+    packagingCost: scaledPackagingCost,
     subtotal,
     marginAmount,
     priceBeforeVat,
+    quantityDiscountAmount,
+    quantityDiscountPercent,
     vatAmount,
     totalPrice,
-    pricePerGram: plate.totalWeightGrams > 0 ? totalPrice / plate.totalWeightGrams : 0,
+    pricePerGram: totalWeightGrams > 0 ? totalPrice / (totalWeightGrams * (inputs.quantity || 1)) : 0,
   };
 }

@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { calculateCost } from "@/lib/costCalculator";
+import { calculateAllPlatesCost, calculateCost } from "@/lib/costCalculator";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { formatDuration } from "@/lib/format";
-import { formatDocumentNumber, renderInvoiceHtml } from "@/lib/invoice";
+import { allocateInvoiceAmounts, formatDocumentNumber, renderInvoiceHtml } from "@/lib/invoice";
 import { getIntlLocale } from "@/lib/i18n";
 import { useLocale } from "@/lib/locale";
 import type { AppSettings, ParsedPrint } from "@/lib/types";
 import { Modal } from "./Modal";
+import { usePlateSelection } from "@/lib/plateSelectionContext";
 
 const fieldClass =
   "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
@@ -24,6 +25,7 @@ export function InvoiceExport({
   kind?: "invoice" | "quote";
 }) {
   const { inputs } = useCostInputs();
+  const { plates, plate: selectedPlate, allSelected } = usePlateSelection();
   const { t, money, lang } = useLocale();
   const templates = kind === "quote" ? settings.quoteTemplates : settings.invoiceTemplates;
   const prefix = kind === "quote" ? "quote" : "invoice";
@@ -34,6 +36,7 @@ export function InvoiceExport({
   const [customer, setCustomer] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState("");
+  const [showQuantityDiscount, setShowQuantityDiscount] = useState(true);
 
   // Advances the shared counter in Settings so the next document suggests the following number.
   async function bumpNumberingCounter() {
@@ -55,26 +58,79 @@ export function InvoiceExport({
     const template = templates.find((item) => item.id === templateId);
     if (!template) return null;
 
-    const result = calculateCost(print.plate, settings, inputs);
+    const quantity = inputs.quantity || 1;
+    const includeAllPlates = allSelected && plates.length > 1;
+    const documentPlates = includeAllPlates ? plates : [selectedPlate ?? print.plate];
+    const result = includeAllPlates
+      ? calculateAllPlatesCost(documentPlates, settings, inputs)
+      : calculateCost(documentPlates[0], settings, inputs);
+    const positionItems = plates.length > 1
+      ? (() => {
+          if (!includeAllPlates) {
+            return [{
+              name: selectedPlate.plateName ?? t("print.plateNumber", {
+                number: selectedPlate.plateIndex ?? plates.indexOf(selectedPlate) + 1,
+              }),
+              quantity,
+              unitPrice: result.totalPrice / quantity,
+              amount: result.totalPrice,
+            }];
+          }
+
+          const perPlateInputs = {
+            ...inputs,
+            energyKwhOverride: null,
+            laborMinutes: 0,
+            packagingCost: 0,
+            extraCosts: [],
+            quantity: 1,
+          };
+          const plateBaseCosts = documentPlates.map((item) =>
+            calculateCost(item, settings, perPlateInputs).subtotal
+          );
+          const allocatedAmounts = allocateInvoiceAmounts(result.totalPrice, plateBaseCosts);
+          return documentPlates.map((item, index) => ({
+            name: item.plateName ?? t("print.plateNumber", {
+              number: item.plateIndex ?? index + 1,
+            }),
+            quantity,
+            unitPrice: allocatedAmounts[index] / quantity,
+            amount: allocatedAmounts[index],
+          }));
+        })()
+      : undefined;
+    const documentWeight = documentPlates.reduce((sum, item) => sum + item.totalWeightGrams, 0);
+    const documentTime = documentPlates.reduce((sum, item) => sum + item.totalPrintTimeSeconds, 0);
     const locale = getIntlLocale(lang);
     const asDate = (value: string) => (value ? new Date(value).toLocaleDateString(locale) : "");
 
     const values: Record<string, string> = {
       ...template.customValues,
+      companyName: settings.general.companyName || template.customValues?.companyName || "",
+      companyAddress: settings.general.companyAddress || template.customValues?.companyAddress || "",
+      companyEmail: settings.general.companyEmail || template.customValues?.companyEmail || "",
+      companyPhone: settings.general.companyPhone || template.customValues?.companyPhone || "",
+      companyTaxId: settings.general.companyTaxId || template.customValues?.companyTaxId || "",
+      companyIban: settings.general.companyIban || template.customValues?.companyIban || "",
       customerName: customer.split("\n")[0] ?? "",
       customerAddress: customer,
       invoiceNumber: number,
       invoiceDate: asDate(date),
       dueDate: asDate(dueDate),
-      printName: print.displayName ?? print.fileName,
-      printWeight: `${print.plate.totalWeightGrams.toFixed(1)} g`,
-      printTime: formatDuration(print.plate.totalPrintTimeSeconds),
-      quantity: String(inputs.quantity),
+      printName: includeAllPlates
+        ? print.displayName ?? print.fileName
+        : `${print.displayName ?? print.fileName} — ${documentPlates[0].plateName ?? t("print.plateNumber", {
+            number: documentPlates[0].plateIndex ?? 1,
+          })}`,
+      printWeight: `${documentWeight.toFixed(1)} g`,
+      printTime: formatDuration(documentTime),
+      quantity: String(quantity),
       subtotal: money(result.subtotal),
       margin: money(result.marginAmount),
       tax: money(result.vatAmount),
       vatPercent: String(inputs.vatPercent),
       total: money(result.totalPrice),
+      paymentTerms: template.customValues?.paymentTerms ?? "",
     };
 
     return renderInvoiceHtml({
@@ -84,6 +140,15 @@ export function InvoiceExport({
       money,
       title: `${t(`${prefix}.documentTitle`)} ${number}`,
       autoPrint,
+      positionItems,
+      showQuantityDiscount,
+      quantityDiscountLabel: t("cost.quantityDiscount"),
+      positionLabels: {
+        item: t("invoice.positionItem"),
+        quantity: t("invoice.positionQuantity"),
+        unitPrice: t("invoice.positionUnitPrice"),
+        total: t("invoice.positionTotal"),
+      },
     });
   }
 
@@ -163,6 +228,16 @@ export function InvoiceExport({
                 placeholder={t("invoice.customerPlaceholder")}
                 className={fieldClass}
               />
+            </label>
+
+            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={showQuantityDiscount}
+                onChange={(event) => setShowQuantityDiscount(event.target.checked)}
+                className="h-4 w-4 accent-orange-500"
+              />
+              {t("invoice.showQuantityDiscount")}
             </label>
 
             <div className="grid grid-cols-2 gap-3">

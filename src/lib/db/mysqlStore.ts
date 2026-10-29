@@ -1,6 +1,6 @@
 import mysql from "mysql2/promise";
 import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
-import { defaultSettings, migrateSettings, type DataStore } from "./shared";
+import { defaultSettings, migrateSettings, printModelKey, type DataStore } from "./shared";
 
 async function ensureSchema(pool: mysql.Pool): Promise<void> {
   await pool.query(`
@@ -91,24 +91,36 @@ export function createMysqlStore(connectionString?: string): DataStore {
     return rows[0] ? (JSON.parse(rows[0].data) as ParsedPrint) : null;
   }
 
-  async function savePrintModel(id: string, model: Buffer): Promise<void> {
+  async function savePrintModel(id: string, model: Buffer, plateIndex?: number): Promise<void> {
     await ready;
     await pool.query(
       "INSERT INTO print_models (id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
-      [id, model]
+      [printModelKey(id, plateIndex), model]
     );
   }
 
-  async function getPrintModel(id: string): Promise<Buffer | null> {
+  async function getPrintModel(id: string, plateIndex?: number): Promise<Buffer | null> {
     await ready;
-    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT data FROM print_models WHERE id = ?", [id]);
+    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT data FROM print_models WHERE id = ?", [printModelKey(id, plateIndex)]);
     return (rows[0]?.data as Buffer | undefined) ?? null;
+  }
+
+  async function listPrintModels(id: string): Promise<{ plateIndex: number | null; model: Buffer }[]> {
+    await ready;
+    const [rows] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT id, data FROM print_models WHERE id = ? OR id LIKE ?",
+      [id, `${id}:%`]
+    );
+    return rows.map((row) => ({
+      plateIndex: row.id === id ? null : Number(String(row.id).slice(id.length + 1)),
+      model: row.data as Buffer,
+    })).filter((row) => row.plateIndex === null || Number.isSafeInteger(row.plateIndex));
   }
 
   async function deletePrint(id: string): Promise<void> {
     await ready;
     await pool.query("DELETE FROM prints WHERE id = ?", [id]);
-    await pool.query("DELETE FROM print_models WHERE id = ?", [id]);
+    await pool.query("DELETE FROM print_models WHERE id = ? OR id LIKE ?", [id, `${id}:%`]);
   }
 
   async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -148,6 +160,7 @@ export function createMysqlStore(connectionString?: string): DataStore {
     getPrint,
     savePrintModel,
     getPrintModel,
+    listPrintModels,
     updatePrintName,
     deletePrint,
     getPrintCostInputs,

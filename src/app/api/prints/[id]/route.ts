@@ -52,6 +52,20 @@ export async function PUT(
   if (body.plate && typeof body.plate === "object") {
     const print = await getPrint(id);
     if (!print) return NextResponse.json({ error: "Druck nicht gefunden." }, { status: 404 });
+    const rawPlateIndex = form ? form.get("plateIndex") : body.plateIndex;
+    const plateIndex = rawPlateIndex === null || rawPlateIndex === undefined
+      ? undefined
+      : Number(rawPlateIndex);
+    if (rawPlateIndex !== null && rawPlateIndex !== undefined &&
+      (!Number.isSafeInteger(plateIndex) || (plateIndex ?? 0) < 1)) {
+      return NextResponse.json({ error: "Ungültige Druckplattennummer." }, { status: 400 });
+    }
+    const currentPlate = plateIndex === undefined
+      ? print.plate
+      : print.plates
+        ? print.plates.find((item) => item.plateIndex === plateIndex)
+        : print.plate;
+    if (!currentPlate) return NextResponse.json({ error: "Druckplatte nicht gefunden." }, { status: 404 });
     const plate = body.plate;
     if (
       typeof plate.totalWeightGrams !== "number" ||
@@ -59,7 +73,7 @@ export async function PUT(
       !Array.isArray(plate.filaments) ||
       !Number.isFinite(plate.totalWeightGrams) || !Number.isFinite(plate.totalPrintTimeSeconds) ||
       plate.totalWeightGrams < 0 || plate.totalPrintTimeSeconds < 0 ||
-      (!print.manual && plate.filaments.length !== print.plate.filaments.length) ||
+      (!print.manual && plate.filaments.length !== currentPlate.filaments.length) ||
       plate.filaments.some((f: { usedGramsTotal?: unknown }) => typeof f.usedGramsTotal !== "number" || !Number.isFinite(f.usedGramsTotal) || f.usedGramsTotal < 0)
     ) {
       return NextResponse.json({ error: "Ungültige Druckwerte." }, { status: 400 });
@@ -73,7 +87,7 @@ export async function PUT(
         return NextResponse.json({ error: "Ungültige Materialdaten." }, { status: 400 });
       }
     }
-    let thumbnailBase64 = print.plate.thumbnailBase64;
+    let thumbnailBase64 = currentPlate.thumbnailBase64;
     if (form?.get("removeImage") === "true") thumbnailBase64 = null;
     else if (form?.get("image") instanceof File) {
       try {
@@ -83,8 +97,16 @@ export async function PUT(
       }
     }
     const breakdown = manualFilaments && manualCategories ? manualBreakdown(print.displayName ?? print.fileName, manualFilaments, manualCategories) : {};
-    await savePrint({ ...print, plate: { ...print.plate, ...plate,
-      ...(manualFilaments ? { filaments: manualFilaments } : {}), ...breakdown, thumbnailBase64 } });
+    const updatedPlate = { ...currentPlate, ...plate,
+      ...(manualFilaments ? { filaments: manualFilaments } : {}), ...breakdown, thumbnailBase64 };
+    const updatedPlates = print.plates?.map((item) =>
+      item.plateIndex === currentPlate.plateIndex ? updatedPlate : item
+    );
+    await savePrint({
+      ...print,
+      plate: updatedPlates?.[0] ?? updatedPlate,
+      ...(updatedPlates ? { plates: updatedPlates } : {}),
+    });
     return NextResponse.json({ ok: true });
   }
   if (body.externalSpools !== undefined &&

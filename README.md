@@ -25,10 +25,15 @@ tower and total) and multi-color information, and calculates print costs.
 - Drag-and-drop upload of `.gcode.3mf` files on desktop and mobile
 - Automatic analysis of total weight, print time, category weights, filament
   colors and types, and objects on the build plate
+- Multi-plate 3MF projects show each plate's data and 2D/3D preview; all plates
+  can also be selected for total project costs or created as individual saved
+  prints after confirmation, and added as separate invoice/quote items
 - Local SQLite storage for all prints in `data/3d-pcc.db`
 - Cost calculator for material, electricity, machine wear, labor, packaging,
   profit margin and tax
 - Configurable material prices, printer profiles and cost settings
+- Company sender details for invoice and quote templates are configured under
+  **Settings → General**
 - Read-only Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
 - Interactive 3D preview: embedded model meshes when available, otherwise a
@@ -36,8 +41,8 @@ tower and total) and multi-color information, and calculates print costs.
   as solid filament strands with slicer-provided widths and layer heights.
   No depositing segments are sampled or dropped. Toolpaths are not the original
   surface model and cannot exactly reproduce the slicer's thumbnail.
-  The first matching G-code plate is displayed; travel and custom machine
-  routines are excluded. Re-upload older prints to replace sampled preview data.
+  Each sliced plate has its own G-code preview; travel and custom machine
+  routines are excluded. Re-upload older prints to generate per-plate previews.
   Disable **Enable 3D preview** under **Settings > General** to show only 2D
   images and skip generating 3D data on new uploads. Existing preview data is
   retained. Prints uploaded while disabled require another upload for 3D after

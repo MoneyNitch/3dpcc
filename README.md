@@ -224,6 +224,12 @@ Set-ExecutionPolicy -Scope Process Bypass
 npm run start:production
 ```
 
+On Windows, if `better-sqlite3` needs to compile from source, install Python 3
+and Visual Studio Build Tools with the **Desktop development with C++** workload.
+Make sure `py -3 --version` works in PowerShell, then rerun the installer. If
+Python is installed but not detected, set `$env:PYTHON` to the full path of
+`python.exe` before running the installer.
+
 Linux, macOS or Raspberry Pi:
 
 ```bash

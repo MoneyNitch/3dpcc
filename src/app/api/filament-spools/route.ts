@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { getFilamentConnections } from "@/lib/filamentConfig";
 import { fetchExternalSpools, FILAMENT_PROVIDERS, FilamentServiceError, type ExternalSpoolResult } from "@/lib/externalFilaments";
+import { authorize } from "@/lib/auth/server";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await authorize(request, "prints.read");
+  if (denied) return denied;
   try {
     const connections = getFilamentConnections();
     const results = await Promise.all(FILAMENT_PROVIDERS.filter((provider) => connections[provider].url)

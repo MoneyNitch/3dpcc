@@ -1,4 +1,5 @@
 "use client";
+import { usePermission } from "@/lib/auth/context";
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -17,6 +18,7 @@ export function CostCalculator({
 }) {
   const { plates, plate, allSelected } = usePlateSelection();
   const { inputs, update, save, saved, saveError } = useCostInputs();
+  const canSave = usePermission("prints.write");
   const { t, money, currency, lang } = useLocale();
   const [spoolResults, setSpoolResults] = useState<ExternalSpoolResult[] | null>(null);
   const [loadingSpools, setLoadingSpools] = useState(false);
@@ -364,10 +366,11 @@ export function CostCalculator({
       </div>
 
       <button
+        disabled={!canSave}
         onClick={save}
         className="mt-5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
       >
-        {saved ? t("cost.saved") : t("cost.save")}
+        {!canSave ? t("auth.readOnlyCalculation") : saved ? t("cost.saved") : t("cost.save")}
       </button>
       {saveError && <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">{t("cost.saveError")}</p>}
     </div>

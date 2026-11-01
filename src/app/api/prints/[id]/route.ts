@@ -12,11 +12,14 @@ import { manualBreakdown, parseManualCategories, parseManualFilaments } from "@/
 import { getPreviewQueue } from "@/lib/previewQueue";
 import { z } from "zod";
 import { externalSpoolSchema } from "@/lib/externalFilaments";
+import { authorize } from "@/lib/auth/server";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await authorize(_req, "prints.read");
+  if (denied) return denied;
   const { id } = await params;
   const print = await getPrint(id);
   if (!print) {
@@ -30,6 +33,8 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await authorize(_req, "prints.write");
+  if (denied) return denied;
   const { id } = await params;
   await (await getPreviewQueue()).cancel(id);
   await deletePrint(id);
@@ -40,6 +45,8 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await authorize(req, "prints.write");
+  if (denied) return denied;
   const { id } = await params;
   const isForm = req.headers.get("content-type")?.includes("multipart/form-data");
   const form = isForm ? await req.formData() : null;
@@ -121,6 +128,8 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await authorize(req, "prints.write");
+  if (denied) return denied;
   const { id } = await params;
   const body = await req.json();
   const displayName = typeof body.displayName === "string" ? body.displayName.trim() : "";

@@ -13,11 +13,14 @@ import {
 import type { ParsedPrint } from "@/lib/types";
 import { renamePlate } from "@/lib/plateNames";
 import { ApiError, errorResponse, readJson } from "@/lib/api/http";
+import { authorize } from "@/lib/auth/server";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = await authorize(request, "prints.write");
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await readJson(request);
@@ -34,6 +37,8 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = await authorize(_request, "prints.write");
+  if (denied) return denied;
   const { id } = await params;
   const source = await getPrint(id);
   if (!source) return NextResponse.json({ error: "Druck nicht gefunden." }, { status: 404 });

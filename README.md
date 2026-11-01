@@ -22,7 +22,9 @@ tower and total) and multi-color information, and calculates print costs.
 
 ## Features
 
-- Versioned REST API with environment-configured API keys and a protected,
+- Login, user management and viewer/admin/superadmin/custom roles, with
+  user-bound API keys and an environment switch for local login-free operation.
+- Versioned REST API with role-checked API keys and a protected,
   locally served Swagger/OpenAPI view at `/api/v1/docs`.
   See [API documentation](./docs/api.md) for setup, endpoints and examples.
   This protects only `/api/v1`, not the existing UI or internal endpoints.
@@ -244,6 +246,79 @@ On first startup, `data/3d-pcc.db` and the local database configuration are
 created automatically when needed. These files contain prints, settings and
 invoice data and are intentionally excluded from the repository by
 `.gitignore`.
+
+### Login and roles
+
+Login is **enabled by default**. On the first login use **admin / admin**.
+This initial account is a **superadmin** and must change **both its username
+and password before accessing the application**, including setup and APIs.
+New passwords must have 12–128 characters; usernames have 3–64 characters
+(`A–Z`, `a–z`, `0–9`, `.`, `_`, `-`) and are stored lowercase.
+Secure this known initial account immediately, before exposing the server to
+other users. There is no public registration.
+
+Superadmins use **Settings → User management** to create, edit,
+disable or delete accounts, reset passwords, define named custom roles and
+issue/revoke user-bound API keys. New/reset passwords must be changed at the
+next login. Click your username in the navigation to open the user menu with
+**Change password** and **Sign out**.
+
+| Role | Permissions |
+|---|---|
+| Viewer | View prints, calculations, document templates and regular settings. Local calculation changes cannot be saved. |
+| Admin | Additionally create/edit/delete prints and edit invoices, quotes, templates, numbering and regular settings. |
+| Superadmin | Additionally manage users, roles, database connections/transfers, filament connections, support exports and API keys. |
+| Custom | Individually selected permissions; necessary read permissions are added automatically. User/role/API-key management remains superadmin-only. |
+
+Roles are enforced server-side on pages, internal APIs and `/api/v1`, not
+just by hiding buttons. An active superadmin must always remain; your own
+account cannot be deleted, disabled, demoted or reset through user management.
+Viewer calculations remain interactive locally, but persistence is forbidden.
+
+To disable **all browser login and role checks**, set in `.env.local`:
+
+```dotenv
+AUTH_ENABLED=false
+```
+
+Restart the server after changing environment values. With login disabled,
+the existing local UI/internal APIs are unrestricted and user management is
+hidden. Use this only on a trusted network. Existing accounts are preserved
+and become active again when login is re-enabled. `/api/v1` still requires
+legacy `API_KEYS` in this mode; without them it returns HTTP 503.
+With login enabled, environment `API_KEYS` are ignored: create user-bound
+keys in User management after the target account has changed its assigned
+password. Keys inherit that user's current permissions and are shown only
+once. See [API documentation](./docs/api.md).
+
+Passwords are salted scrypt hashes. Sessions use random, hashed server-side
+tokens and `HttpOnly`, `SameSite=Lax` cookies, expiring after 12 hours.
+Logout revokes the current session. Changing credentials, resetting/editing/
+disabling/deleting users or changing their custom role revokes their sessions
+and API keys. Login attempts are rate-limited persistently (10 attempts per
+username per 15 minutes, 100 total per minute).
+
+Authentication is stored separately in **`data/auth.db`**, irrespective of
+the print database backend. It remains local even with PostgreSQL/MySQL and
+is not copied by the print-database transfer or included in support exports.
+Back up and protect the complete `data/` directory; loss of the auth database
+recreates the known bootstrap credentials. Run one app instance per data
+directory and do not expose it without first securing the bootstrap account.
+
+For HTTPS behind a reverse proxy, set the exact public origin and force
+secure cookies:
+
+```dotenv
+AUTH_ORIGIN=https://3dpcc.example.com
+AUTH_COOKIE_SECURE=true
+```
+
+Without `AUTH_ORIGIN`, mutation requests must originate from the request
+host/protocol. Include the port if non-standard. HTTPS is required over
+untrusted networks. Docker Compose forwards all three auth variables from
+its `.env`. `AUTH_ENABLED` accepts only `true` or `false`; invalid values
+fail closed. Run `npm run test:auth` for authentication and route integration
+tests, and `npm run test:api` for legacy API regression tests.
 
 ### Installation scripts
 

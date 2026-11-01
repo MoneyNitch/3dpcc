@@ -1,16 +1,25 @@
 import { getSettings } from "@/lib/db";
 import { getDbConfigView } from "@/lib/dbConfig";
 import { translate } from "@/lib/i18n";
-import { SettingsForm } from "@/components/SettingsForm";
+import { SettingsForm, type SettingsTab } from "@/components/SettingsForm";
 import { DatabaseSettingsForm } from "@/components/DatabaseSettingsForm";
 import { FilamentConnectionSettings } from "@/components/FilamentConnectionSettings";
+import { UserManagement } from "@/components/UserManagement";
 import { getFilamentConnectionsView } from "@/lib/filamentConfig";
+import { authEnabled, requirePage } from "@/lib/auth/server";
+import { hasPermission } from "@/lib/auth/permissions";
+import { getAuthStore } from "@/lib/auth/store";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+  const user = await requirePage("settings.read");
+  const enabled = authEnabled();
+  const can = (permission: Parameters<typeof hasPermission>[1]) => hasPermission(user, permission, enabled);
+  const manageUsers = Boolean(enabled && user && can("users.manage"));
+  const { tab } = await searchParams;
+  const initialTab: SettingsTab = tab === "users" && manageUsers ? "users" : "general";
   const settings = await getSettings();
-  const dbConfig = getDbConfigView();
   const lang = settings.general.language;
   const t = (key: Parameters<typeof translate>[1]) =>
     translate(lang, key, undefined, settings.customLanguagePacks);
@@ -32,8 +41,10 @@ export default async function SettingsPage() {
       )}
       <SettingsForm
         initialSettings={settings}
-        databaseSettings={<DatabaseSettingsForm initialConfig={dbConfig} />}
-        filamentSettings={<FilamentConnectionSettings initialConnections={getFilamentConnectionsView()} />}
+        databaseSettings={can("database.manage") ? <DatabaseSettingsForm initialConfig={getDbConfigView()} /> : null}
+        filamentSettings={can("integrations.manage") ? <FilamentConnectionSettings initialConnections={getFilamentConnectionsView()} /> : null}
+        userSettings={manageUsers && user ? <UserManagement initial={getAuthStore().overview()} actorId={user.id} /> : null}
+        initialTab={initialTab}
       />
     </div>
   );

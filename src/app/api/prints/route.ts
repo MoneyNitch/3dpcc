@@ -6,13 +6,18 @@ import type { ParsedPrint } from "@/lib/types";
 import { readPrintImage } from "@/lib/printImage";
 import { parseManualFilaments, parseManualCategories, manualBreakdown } from "@/lib/manualPrint";
 import { originalArchives } from "@/lib/originalArchives";
+import { authorize } from "@/lib/auth/server";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await authorize(request, "prints.read");
+  if (denied) return denied;
   const prints = await listPrints();
   return NextResponse.json({ prints });
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await authorize(req, "prints.write");
+  if (denied) return denied;
   const formData = await req.formData();
   if (formData.get("mode") === "manual") {
     const name = String(formData.get("name") ?? "").trim();

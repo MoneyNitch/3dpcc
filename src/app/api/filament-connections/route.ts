@@ -6,8 +6,11 @@ import {
   saveFilamentConnection,
 } from "@/lib/filamentConfig";
 import { fetchExternalSpools, FilamentServiceError } from "@/lib/externalFilaments";
+import { authorize } from "@/lib/auth/server";
 
 export async function PUT(request: Request) {
+  const denied = await authorize(request, "integrations.manage");
+  if (denied) return denied;
   let input;
   try {
     input = filamentConnectionInput.safeParse(await request.json());

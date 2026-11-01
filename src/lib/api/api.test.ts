@@ -13,11 +13,16 @@ import { dispatchApi } from "./router";
 const key = "a".repeat(43);
 const secondKey = "b".repeat(43);
 let previousKeys: string | undefined;
+let previousAuth: string | undefined;
 beforeEach(() => {
+  previousAuth = process.env.AUTH_ENABLED;
+  process.env.AUTH_ENABLED = "false";
   previousKeys = process.env.API_KEYS;
   process.env.API_KEYS = `${key}, ${secondKey}`;
 });
 afterEach(() => {
+  if (previousAuth === undefined) delete process.env.AUTH_ENABLED;
+  else process.env.AUTH_ENABLED = previousAuth;
   if (previousKeys === undefined) delete process.env.API_KEYS;
   else process.env.API_KEYS = previousKeys;
 });

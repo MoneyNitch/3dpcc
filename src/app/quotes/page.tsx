@@ -2,10 +2,12 @@ import { InvoiceTemplateBuilder } from "@/components/InvoiceTemplateBuilder";
 import { getSettings } from "@/lib/db";
 import { translate } from "@/lib/i18n";
 import { requireSetupComplete } from "@/lib/setupGuard";
+import { requirePage } from "@/lib/auth/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function QuotesPage() {
+  await requirePage("documents.read");
   const settings = await getSettings();
   requireSetupComplete(settings);
   const lang = settings.general.language;

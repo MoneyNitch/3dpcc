@@ -6,6 +6,7 @@ import { useLocale } from "@/lib/locale";
 import { createToolpathRenderer } from "@/lib/toolpathRenderer";
 import { getToolpathLayerHeights } from "@/lib/toolpathLayers";
 import { usePlateSelection } from "@/lib/plateSelectionContext";
+import { usePermission } from "@/lib/auth/context";
 
 type PreviewMode = "2d" | "3d";
 type ModelStatus = "idle" | "computing" | "buildError" | "ready" | "unavailable" | "error";
@@ -39,6 +40,7 @@ export function ModelPreview({
   allow3d: boolean;
 }) {
   const { t } = useLocale();
+  const canEdit = usePermission("prints.write");
   const { plate } = usePlateSelection();
   const thumbnail = plate.thumbnailBase64;
   const plateIndex = plate.plateIndex;
@@ -416,7 +418,7 @@ export function ModelPreview({
             : status === "unavailable"
               ? t("print.modelUnavailable")
               : t("print.modelLoadError")}
-          {status === "buildError" && (
+          {canEdit && status === "buildError" && (
             <button type="button" onClick={() => void retryPreview()} className="rounded-lg bg-orange-500 px-3 py-2 font-medium text-white hover:bg-orange-600">
               {t("print.modelRetry")}
             </button>

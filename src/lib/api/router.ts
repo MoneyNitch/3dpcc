@@ -1,6 +1,8 @@
 import { bearerKey, configuredKeys } from "./auth";
 import { ApiError, errorResponse, privateResponse } from "./http";
 import type { Operation } from "./operations";
+import { authEnabled, requestIdentity } from "../auth/server";
+import { apiPermission, hasPermission, type Permission } from "../auth/permissions";
 
 export async function dispatchApi(
   request: Request, parts: string[], operations: Operation[],
@@ -8,18 +10,22 @@ export async function dispatchApi(
 ): Promise<Response> {
   let response: Response;
   try {
-    let keys: string[];
-    try {
-      keys = configuredKeys();
-    } catch (error) {
-      console.error("3D-PCC API configuration error:", error);
-      throw new ApiError(503, "api_not_configured", "API_KEYS configuration is invalid. Check the server logs.");
+    const enabled = authEnabled();
+    let keys: string[] = [];
+    if (!enabled) {
+      try {
+        keys = configuredKeys();
+      } catch (error) {
+        console.error("3D-PCC API configuration error:", error);
+        throw new ApiError(503, "api_not_configured", "API_KEYS configuration is invalid. Check the server logs.");
+      }
+      if (!keys.length) throw new ApiError(503, "api_not_configured", "Configure API_KEYS on the server to enable this API.");
     }
-    if (!keys.length) throw new ApiError(503, "api_not_configured", "Configure API_KEYS on the server to enable this API.");
     if (parts[0] === "docs") {
       response = await docs(request, parts, keys, operations);
     } else {
-      if (!bearerKey(request, keys)) throw new ApiError(401, "unauthorized", "A valid API key is required.");
+      const user = enabled && request.headers.has("authorization") ? await requestIdentity(request, true) : null;
+      if (enabled ? !user : !bearerKey(request, keys)) throw new ApiError(401, "unauthorized", "A valid API key is required.");
       const matches = operations.flatMap((operation) => {
         const segments = operation.path.slice(1).split("/");
         if (segments.length !== parts.length) return [];
@@ -40,7 +46,16 @@ export async function dispatchApi(
         const allowed = specific.map(({ operation }) => operation.method);
         if (allowed.includes("GET")) allowed.push("HEAD");
         response.headers.set("Allow", allowed.join(", "));
-      } else response = await match.operation.execute(request, match.params);
+      } else {
+        const allowed: Permission[] = match.operation.path === "/settings"
+          ? (method === "GET" ? ["settings.read", "documents.read", "prints.read"] : ["settings.write", "documents.write"])
+          : [apiPermission(match.operation.path, method)];
+        if (enabled && (!allowed.some((permission) => hasPermission(user, permission)) ||
+            (match.operation.tag === "Documents" && !hasPermission(user, "prints.read")))) {
+          throw new ApiError(403, "forbidden", "Your role does not permit this operation.");
+        }
+        response = await match.operation.execute(request, match.params);
+      }
     }
     response = privateResponse(response);
   } catch (error) {

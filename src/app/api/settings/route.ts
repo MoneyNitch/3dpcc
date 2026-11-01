@@ -5,12 +5,18 @@ import { getPreviewQueue } from "@/lib/previewQueue";
 import { isCurrencyCode } from "@/lib/currency";
 import { parseLanguagePack } from "@/lib/i18n";
 import type { LanguagePack } from "@/lib/types";
+import { authEnabled, authorize, requestIdentity } from "@/lib/auth/server";
+import { canUpdateSettings } from "@/lib/auth/settings";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await authorize(request, ["settings.read", "documents.read", "prints.read"]);
+  if (denied) return denied;
   return NextResponse.json({ settings: await getSettings() });
 }
 
 export async function PUT(req: NextRequest) {
+  const denied = await authorize(req, ["settings.write", "documents.write"]);
+  if (denied) return denied;
   const body = await req.json();
   if (body?.customLanguagePacks !== undefined && !Array.isArray(body.customLanguagePacks)) {
     return NextResponse.json({ error: "Sprachpakete müssen als Liste übermittelt werden." }, { status: 400 });
@@ -53,7 +59,15 @@ export async function PUT(req: NextRequest) {
   if (duty !== undefined && (typeof duty !== "number" || !Number.isInteger(duty) || duty < 10 || duty > 100)) {
     return NextResponse.json({ error: "Die Hintergrund-Rechenleistung muss zwischen 10 und 100 liegen." }, { status: 400 });
   }
-  await saveSettings(migrateSettings(body));
+  const next = migrateSettings(body);
+  if (authEnabled()) {
+    const user = await requestIdentity(req, true);
+    const current = await getSettings();
+    if (!canUpdateSettings(user, current, next)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+  }
+  await saveSettings(next);
   (await getPreviewQueue()).start();
   return NextResponse.json({ ok: true });
 }

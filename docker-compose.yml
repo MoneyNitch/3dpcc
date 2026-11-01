@@ -15,8 +15,12 @@ services:
       # or configure the connection later from the /settings page in the app.
       - DB_DRIVER=${DB_DRIVER:-sqlite}
       - DATABASE_URL=${DATABASE_URL:-}
-      # Set API_KEYS in Compose's .env to enable the versioned API.
+      # Browser login and user-bound API keys are enabled by default.
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
+      - AUTH_ORIGIN=${AUTH_ORIGIN:-}
+      # Legacy API keys apply only with AUTH_ENABLED=false.
       - API_KEYS=${API_KEYS:-}
     volumes:
-      # Persists SQLite, DB config/key and queued original uploads across restarts.
+      # Persists SQLite, authentication, DB config/key and queued original uploads.
       - ./data:/app/data

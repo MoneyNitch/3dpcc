@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { authEnabled, requestIdentity } from "../auth/server";
+import { canUpdateSettings } from "../auth/settings";
 import type { DataStore } from "../db/shared";
 import type { AppSettings, InvoiceCostLine, ParsedPlate, ParsedPrint, PrintCostInputs } from "../types";
 import { calculateAllPlatesCost, calculateCost, defaultCostInputs } from "../costCalculator";
@@ -94,8 +96,15 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
     if (!print) throw new ApiError(404, "not_found", "Print not found.");
     return print;
   }
-  async function persistSettings(raw: unknown): Promise<AppSettings> {
+  async function persistSettings(raw: unknown, request: Request): Promise<AppSettings> {
     const settings = parse(settingsSchema, raw);
+    if (authEnabled()) {
+      const user = await requestIdentity(request, true);
+      const current = await store.getSettings();
+      if (!canUpdateSettings(user, current, settings)) {
+        throw new ApiError(403, "forbidden", "Your role does not permit changing these settings.");
+      }
+    }
     let packs;
     try {
       packs = settings.customLanguagePacks.map(parseLanguagePack);
@@ -345,7 +354,7 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
     summary: "Replace all application settings", body: settingsSchema,
     responses: { 200: { description: "Saved", schema: z.object({ settings: settingsSchema }) } },
     async handler(_request, _params, body) {
-      return exclusiveSettings(async () => json({ settings: await persistSettings(body) }));
+      return exclusiveSettings(async () => json({ settings: await persistSettings(body, _request) }));
     },
   });
   add({
@@ -362,7 +371,7 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
             invoice: { ...current.numbering.invoice, ...body.numbering?.invoice },
             quote: { ...current.numbering.quote, ...body.numbering?.quote },
           },
-        }) });
+        }, _request) });
       });
     },
   });
@@ -397,7 +406,7 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
           const item = parse(schema.and(z.object({ id: idSchema })), body);
           const items = get(settings);
           if (items.some((entry) => entry.id === item.id)) throw new ApiError(409, "conflict", "Resource ID already exists.");
-          await persistSettings(set(settings, [...items, item]));
+          await persistSettings(set(settings, [...items, item]), _request);
           const result = json({ item }, 201);
           result.headers.set("Location", `/api/v1${path}/${encodeURIComponent(item.id)}`);
           return result;
@@ -414,7 +423,7 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
           const items = get(settings);
           if (!items.some((entry) => entry.id === id)) throw new ApiError(404, "not_found", "Resource not found.");
           if (item.id !== id) throw new ApiError(400, "validation_error", "Body ID must match path ID.");
-          await persistSettings(set(settings, items.map((entry) => entry.id === id ? item : entry)));
+          await persistSettings(set(settings, items.map((entry) => entry.id === id ? item : entry)), _request);
           return json({ item });
         });
       },
@@ -430,7 +439,7 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
           if (path === "/printers" && id === settings.defaultPrinterId) {
             throw new ApiError(409, "conflict", "Select another default printer before deleting this printer.");
           }
-          await persistSettings(set(settings, items.filter((item) => item.id !== id)));
+          await persistSettings(set(settings, items.filter((item) => item.id !== id)), _request);
           return json({ ok: true });
         });
       },

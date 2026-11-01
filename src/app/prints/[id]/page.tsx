@@ -16,6 +16,8 @@ import { PrintPlateSelector } from "@/components/PrintPlateSelector";
 import { PrintPlateDetails } from "@/components/PrintPlateDetails";
 import { DownloadPrintButton } from "@/components/DownloadPrintButton";
 import { originalArchives } from "@/lib/originalArchives";
+import { authEnabled, requirePage } from "@/lib/auth/server";
+import { hasPermission } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,9 @@ export default async function PrintDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const user = await requirePage("prints.read");
+  const canEdit = hasPermission(user, "prints.write", authEnabled());
+  const canDocument = hasPermission(user, "documents.write", authEnabled());
   const { id } = await params;
   const print = await getPrint(id);
   if (!print) notFound();
@@ -56,8 +61,8 @@ export default async function PrintDetailPage({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <PrintDataEditor id={print.id} plate={plate} manual={print.manual} materials={settings.materials} />
-          <DeletePrintButton id={print.id} />
+          {canEdit && <><PrintDataEditor id={print.id} plate={plate} manual={print.manual} materials={settings.materials} />
+          <DeletePrintButton id={print.id} /></>}
         </div>
       </div>
       <PrintPlateSelector printId={print.id} />
@@ -93,8 +98,8 @@ export default async function PrintDetailPage({
 
         <div className="min-w-0">
           <CostCalculator settings={settings} />
-          <InvoiceExport print={print} settings={settings} />
-          <InvoiceExport print={print} settings={settings} kind="quote" />
+          {canDocument && <><InvoiceExport print={print} settings={settings} />
+          <InvoiceExport print={print} settings={settings} kind="quote" /></>}
         </div>
       </div>
       </CostInputsProvider>

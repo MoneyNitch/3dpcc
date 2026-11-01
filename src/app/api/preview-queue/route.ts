@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { getPrint, getSettings } from "@/lib/db";
 import { getPreviewQueue } from "@/lib/previewQueue";
+import { authorize } from "@/lib/auth/server";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await authorize(request, "prints.read");
+  if (denied) return denied;
   const queue = await getPreviewQueue();
   queue.start();
   const jobs = await queue.list();
@@ -17,6 +20,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
+  const denied = await authorize(request, "prints.write");
+  if (denied) return denied;
   const body: unknown = await request.json();
   if (!body || typeof body !== "object" || !("id" in body) || typeof body.id !== "string" ||
     !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(body.id) ||
@@ -30,6 +35,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const denied = await authorize(request, "prints.write");
+  if (denied) return denied;
   const body: unknown = await request.json();
   if (!body || typeof body !== "object" || !("id" in body) || typeof body.id !== "string" ||
     !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(body.id)) {

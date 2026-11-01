@@ -1,6 +1,6 @@
 {
   "name": "3d-pcc",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "engines": {
     "node": ">=22"
@@ -20,7 +20,8 @@
     "start:production": "npm run build && npm run start",
     "start:production:background": "npm run build && npm run start:background",
     "lint": "eslint",
-    "test:api": "tsx --test src/lib/api/*.test.ts"
+    "test:api": "tsx --test src/lib/api/*.test.ts",
+    "test:auth": "tsx --test src/lib/auth/*.test.ts"
   },
   "dependencies": {
     "adm-zip": "^0.6.0",

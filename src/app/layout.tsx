@@ -4,6 +4,8 @@ import { getSettings } from "@/lib/db";
 import { getTheme } from "@/lib/theme";
 import { LocaleProvider } from "@/lib/locale";
 import { Header } from "@/components/Header";
+import { AuthProvider } from "@/lib/auth/context";
+import { authEnabled, currentIdentity } from "@/lib/auth/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,6 +26,8 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const settings = await getSettings();
   const theme = await getTheme();
+  const enabled = authEnabled();
+  const user = await currentIdentity();
   return (
     <html
       lang={settings.general.language}
@@ -36,8 +40,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           initialCurrency={settings.general.currency}
           initialLanguagePacks={settings.customLanguagePacks}
         >
+          <AuthProvider enabled={enabled} user={user}>
           <Header />
           <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+          </AuthProvider>
         </LocaleProvider>
       </body>
     </html>

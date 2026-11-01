@@ -93,7 +93,7 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     const result = spawnSync(process.execPath, [
       "--import", pathToFileURL(requireModule.resolve("tsx")).href, "--input-type=module", "--eval", script,
     ], {
-      cwd: directory, env: { ...process.env, API_KEYS: "c".repeat(43),
+      cwd: directory, env: { ...process.env, AUTH_ENABLED: "false", API_KEYS: "c".repeat(43),
         TSX_TSCONFIG_PATH: path.resolve("tsconfig.json") },
       encoding: "utf8", timeout: 30_000,
     });

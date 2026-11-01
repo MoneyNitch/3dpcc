@@ -7,8 +7,14 @@ import { getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
 import { useLocale } from "@/lib/locale";
 import type { Material, ParsedPlate } from "@/lib/types";
 import { ManualFilaments, manualFilamentPayload, type FilamentDraft } from "./ManualFilaments";
+import { usePlateSelection } from "@/lib/plateSelectionContext";
 
-export function PrintDataEditor({ id, plate, manual = false, materials = [] }: { id: string; plate: ParsedPlate; manual?: boolean; materials?: Material[] }) {
+export function PrintDataEditor(props: { id: string; plate: ParsedPlate; manual?: boolean; materials?: Material[] }) {
+  const { plate } = usePlateSelection();
+  return <PrintDataEditorForm key={plate.plateIndex ?? 1} {...props} plate={plate} />;
+}
+
+function PrintDataEditorForm({ id, plate, manual = false, materials = [] }: { id: string; plate: ParsedPlate; manual?: boolean; materials?: Material[] }) {
   const router = useRouter();
   const { t, lang } = useLocale();
   const [open, setOpen] = useState(false);
@@ -54,6 +60,7 @@ export function PrintDataEditor({ id, plate, manual = false, materials = [] }: {
       return;
     }
     const data = new FormData();
+    if (plate.plateIndex !== undefined) data.set("plateIndex", String(plate.plateIndex));
     data.set("plate", JSON.stringify({ totalWeightGrams, totalPrintTimeSeconds, printTimeSeconds: totalPrintTimeSeconds,
       filaments: updatedFilaments, ...(manualPayload ? { categoryByFilament: manualPayload.categoryByFilament } : {}) }));
     if (image) data.set("image", image);

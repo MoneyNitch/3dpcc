@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingIncludes: {
     "/*": [".preview-worker/**/*", "node_modules/fast-xml-parser/lib/fxp.cjs"],
+    "/api/v1/\\[\\[\\.\\.\\.path\\]\\]": [
+      "node_modules/swagger-ui-dist/package.json",
+      "node_modules/swagger-ui-dist/swagger-ui.css",
+      "node_modules/swagger-ui-dist/swagger-ui-bundle.js",
+    ],
   },
 };
 

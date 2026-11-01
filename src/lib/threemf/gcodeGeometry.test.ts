@@ -106,3 +106,21 @@ test("prefers G-code paths for layer preview and uses meshes when no paths are a
   assert.notEqual(mesh?.kind, "toolpath");
   assert.deepEqual(mesh?.positions, [5, 0, 0, 6, 0, 0, 5, 1, 0]);
 });
+
+test("selects toolpath geometry from the requested plate", () => {
+  const zip = new AdmZip();
+  zip.addFile("Metadata/plate_1.gcode", Buffer.from(
+    "; filament_colour = #ff0000\n; FEATURE: Outer wall\nG1 X10 Y0 Z0.2 E1\n",
+  ));
+  zip.addFile("Metadata/plate_2.gcode", Buffer.from(
+    "; filament_colour = #00ff00\n; FEATURE: Outer wall\nG1 X20 Y0 Z0.2 E1\n",
+  ));
+  const buffer = zip.toBuffer();
+
+  const first = parse3mfGeometry(buffer, 1);
+  const second = parse3mfGeometry(buffer, 2);
+
+  assert.equal(first?.colors[0], "#ff0000");
+  assert.equal(second?.colors[0], "#00ff00");
+  assert.notDeepEqual(first?.positions, second?.positions);
+});

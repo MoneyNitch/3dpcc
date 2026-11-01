@@ -15,6 +15,8 @@ services:
       # or configure the connection later from the /settings page in the app.
       - DB_DRIVER=${DB_DRIVER:-sqlite}
       - DATABASE_URL=${DATABASE_URL:-}
+      # Set API_KEYS in Compose's .env to enable the versioned API.
+      - API_KEYS=${API_KEYS:-}
     volumes:
       # Persists SQLite, DB config/key and queued original uploads across restarts.
       - ./data:/app/data

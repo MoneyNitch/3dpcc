@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
 import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
-import { defaultSettings, migrateSettings, type DataStore } from "./shared";
+import { defaultSettings, migrateSettings, printModelKey, type DataStore } from "./shared";
 
 function openDb(): Database.Database {
   const dataDir = path.join(process.cwd(), "data");
@@ -92,15 +92,24 @@ export function createSqliteStore(): DataStore {
     return row ? (JSON.parse(row.data) as ParsedPrint) : null;
   }
 
-  async function savePrintModel(id: string, model: Buffer): Promise<void> {
-    db.prepare("INSERT INTO print_models (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data").run(id, model);
+  async function savePrintModel(id: string, model: Buffer, plateIndex?: number): Promise<void> {
+    db.prepare("INSERT INTO print_models (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data").run(printModelKey(id, plateIndex), model);
   }
 
-  async function getPrintModel(id: string): Promise<Buffer | null> {
-    const row = db.prepare("SELECT data FROM print_models WHERE id = ?").get(id) as
+  async function getPrintModel(id: string, plateIndex?: number): Promise<Buffer | null> {
+    const row = db.prepare("SELECT data FROM print_models WHERE id = ?").get(printModelKey(id, plateIndex)) as
       | { data: Buffer }
       | undefined;
     return row?.data ?? null;
+  }
+
+  async function listPrintModels(id: string): Promise<{ plateIndex: number | null; model: Buffer }[]> {
+    const rows = db.prepare("SELECT id, data FROM print_models WHERE id = ? OR id LIKE ?").all(id, `${id}:%`) as
+      { id: string; data: Buffer }[];
+    return rows.map((row) => ({
+      plateIndex: row.id === id ? null : Number(row.id.slice(id.length + 1)),
+      model: row.data,
+    })).filter((row) => row.plateIndex === null || Number.isSafeInteger(row.plateIndex));
   }
 
   async function updatePrintName(id: string, displayName: string): Promise<void> {
@@ -115,7 +124,7 @@ export function createSqliteStore(): DataStore {
 
   async function deletePrint(id: string): Promise<void> {
     db.prepare("DELETE FROM prints WHERE id = ?").run(id);
-    db.prepare("DELETE FROM print_models WHERE id = ?").run(id);
+    db.prepare("DELETE FROM print_models WHERE id = ? OR id LIKE ?").run(id, `${id}:%`);
   }
 
   async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -141,6 +150,7 @@ export function createSqliteStore(): DataStore {
     getPrint,
     savePrintModel,
     getPrintModel,
+    listPrintModels,
     updatePrintName,
     deletePrint,
     getPrintCostInputs,

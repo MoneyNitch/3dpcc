@@ -11,6 +11,7 @@ export interface PreviewWorkerInput {
   source: string;
   output: string;
   budget: SharedArrayBuffer;
+  plateIndices?: number[];
 }
 
 function pause(budget: Int32Array, elapsed: number) {
@@ -52,23 +53,33 @@ async function main(input: PreviewWorkerInput) {
   const port = parentPort;
   if (!port) throw new Error("Preview computation must run in a worker.");
   const budget = new Int32Array(input.budget);
-  const steps = geometrySteps(await readFile(input.source));
-  let step;
-  do {
-    while (Atomics.load(budget, 0) === 0) Atomics.wait(budget, 0, 0, 1000);
-    const started = performance.now();
+  const source = await readFile(input.source);
+  const plateIndices: (number | undefined)[] = input.plateIndices ?? [undefined];
+  const availablePlateIndices: (number | undefined)[] = [];
+
+  for (const plateIndex of plateIndices) {
+    const steps = geometrySteps(source, plateIndex);
+    let step;
     do {
-      step = steps.next();
-    } while (!step.done && performance.now() - started < 10);
-    pause(budget, performance.now() - started);
-  } while (!step.done);
-  if (!step.value) {
-    port.postMessage({ available: false });
-    return;
+      while (Atomics.load(budget, 0) === 0) Atomics.wait(budget, 0, 0, 1000);
+      const started = performance.now();
+      do {
+        step = steps.next();
+      } while (!step.done && performance.now() - started < 10);
+      pause(budget, performance.now() - started);
+    } while (!step.done);
+    if (!step.value) continue;
+
+    const output = plateIndex === undefined ? input.output : `${input.output}.${plateIndex}`;
+    await pipeline(Readable.from(serialize(step.value, budget)), createGzip(), createWriteStream(output + ".tmp"));
+    await rename(output + ".tmp", output);
+    availablePlateIndices.push(plateIndex);
   }
-  await pipeline(Readable.from(serialize(step.value, budget)), createGzip(), createWriteStream(input.output + ".tmp"));
-  await rename(input.output + ".tmp", input.output);
-  port.postMessage({ available: true });
+
+  port.postMessage({
+    available: availablePlateIndices.length > 0,
+    plateIndices: availablePlateIndices.map((plateIndex) => plateIndex ?? null),
+  });
 }
 
 if (parentPort) {

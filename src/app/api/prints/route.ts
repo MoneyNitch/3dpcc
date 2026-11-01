@@ -5,6 +5,7 @@ import { getPreviewQueue } from "@/lib/previewQueue";
 import type { ParsedPrint } from "@/lib/types";
 import { readPrintImage } from "@/lib/printImage";
 import { parseManualFilaments, parseManualCategories, manualBreakdown } from "@/lib/manualPrint";
+import { originalArchives } from "@/lib/originalArchives";
 
 export async function GET() {
   const prints = await listPrints();
@@ -71,9 +72,18 @@ export async function POST(req: NextRequest) {
     const settings = await getSettings();
     await insertPrint(parsed);
     try {
+      if (settings.general.retainOriginalArchives) {
+        await originalArchives.save(parsed.id, buffer);
+      }
       if (settings.general.enable3dPreview) {
         const queue = await getPreviewQueue();
-        await queue.enqueue(parsed.id, buffer);
+        await queue.enqueue(
+          parsed.id,
+          buffer,
+          (parsed.plates ?? [parsed.plate]).map((plate) => plate.plateIndex).filter(
+            (plateIndex): plateIndex is number => plateIndex !== undefined,
+          ),
+        );
         queue.start();
       }
     } catch (error) {
@@ -83,6 +93,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ print: parsed }, { status: 201 });
   } catch (err) {
+    console.error("Failed to upload print:", err);
     const message = err instanceof Error ? err.message : "Unbekannter Fehler beim Verarbeiten der Datei.";
     return NextResponse.json({ error: message }, { status: 422 });
   }

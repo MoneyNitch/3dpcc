@@ -39,6 +39,8 @@ export interface ObjectBreakdown {
 }
 
 export interface ParsedPlate {
+  plateIndex?: number;
+  plateName?: string;
   totalWeightGrams: number;
   printTimeSeconds: number;
   totalPrintTimeSeconds: number;
@@ -76,6 +78,10 @@ export interface ParsedPrint {
   manual?: boolean;
   createdAt: string;
   plate: ParsedPlate;
+  /** Additional plates from a multi-plate 3MF archive; `plate` remains the first plate for older clients. */
+  plates?: ParsedPlate[];
+  /** Reuses the source archive preview for prints created from an individual plate. */
+  previewSource?: { printId: string; plateIndex: number };
 }
 
 export interface Material {
@@ -198,13 +204,21 @@ export interface PreviewQueueEntry {
   id: string;
   status: "queued" | "running" | "error" | "unavailable";
   createdAt: string;
+  plateIndices?: number[];
 }
 
 export interface GeneralSettings {
   language: Language;
   currency: Currency;
   enable3dPreview: boolean;
+  retainOriginalArchives: boolean;
   previewComputePercent: number;
+  companyName: string;
+  companyAddress: string;
+  companyEmail: string;
+  companyPhone: string;
+  companyTaxId: string;
+  companyIban: string;
 }
 
 export interface CostBreakdownLine {
@@ -230,6 +244,8 @@ export interface CostResult {
   subtotal: number;
   marginAmount: number;
   priceBeforeVat: number;
+  quantityDiscountAmount: number;
+  quantityDiscountPercent: number;
   vatAmount: number;
   totalPrice: number;
   pricePerGram: number;
@@ -240,6 +256,8 @@ export interface PrintCostInputs {
   packagingCost: number;
   marginPercent: number;
   vatPercent: number;
+  quantityDiscountThreshold: number;
+  quantityDiscountPercent: number;
   /** Override price per kg per filamentId, falls back to matched material or a default */
   materialPriceOverrides: Record<string, number>;
   /** Read-only external spool snapshots; existing calculations do not require a live connection. */

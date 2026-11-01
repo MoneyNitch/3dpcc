@@ -1,6 +1,7 @@
 import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
 import { resolveDbConnection, type ResolvedDbConnection } from "../dbConfig";
 import type { DataStore } from "./shared";
+import { originalArchives } from "../originalArchives";
 
 // The active backend is resolved from the DB config saved via Settings (data/db-config.json),
 // falling back to DB_DRIVER/DATABASE_URL env vars if nothing was saved there yet.
@@ -56,12 +57,26 @@ export async function getPrint(id: string): Promise<ParsedPrint | null> {
   return (await getStore()).getPrint(id);
 }
 
-export async function savePrintModel(id: string, model: Buffer): Promise<void> {
-  return (await getStore()).savePrintModel(id, model);
+export async function savePrintModel(id: string, model: Buffer, plateIndex?: number): Promise<void> {
+  const store = await getStore();
+  await store.savePrintModel(id, model, plateIndex);
+  if (plateIndex === undefined) return;
+
+  const linkedPrints = (await store.listPrints()).filter(
+    (print) => print.previewSource?.printId === id &&
+      print.previewSource.plateIndex === plateIndex
+  );
+  for (const print of linkedPrints) {
+    await store.savePrintModel(print.id, model, print.plate.plateIndex ?? plateIndex);
+  }
 }
 
-export async function getPrintModel(id: string): Promise<Buffer | null> {
-  return (await getStore()).getPrintModel(id);
+export async function getPrintModel(id: string, plateIndex?: number): Promise<Buffer | null> {
+  return (await getStore()).getPrintModel(id, plateIndex);
+}
+
+export async function listPrintModels(id: string): Promise<{ plateIndex: number | null; model: Buffer }[]> {
+  return (await getStore()).listPrintModels(id);
 }
 
 export async function updatePrintName(id: string, displayName: string): Promise<void> {
@@ -69,7 +84,8 @@ export async function updatePrintName(id: string, displayName: string): Promise<
 }
 
 export async function deletePrint(id: string): Promise<void> {
-  return (await getStore()).deletePrint(id);
+  await originalArchives.remove(id);
+  await (await getStore()).deletePrint(id);
 }
 
 export async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -95,8 +111,9 @@ export async function transferDatabaseData(targetConnection: ResolvedDbConnectio
   await target.saveSettings(settings);
   for (const print of prints) {
     await target.insertPrint(print);
-    const model = await source.getPrintModel(print.id);
-    if (model) await target.savePrintModel(print.id, model);
+    for (const { plateIndex, model } of await source.listPrintModels(print.id)) {
+      await target.savePrintModel(print.id, model, plateIndex ?? undefined);
+    }
     const inputs = await source.getPrintCostInputs(print.id);
     if (inputs) await target.savePrintCostInputs(print.id, inputs);
   }

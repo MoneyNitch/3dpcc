@@ -81,11 +81,37 @@ interface RawFilament extends FilamentUsage {
 }
 
 interface SliceInfo {
+  plateIndex: number;
+  plateName: string | null;
   plateWeight: number | null;
   predictionSeconds: number | null;
   printerModelId: string | null;
   objects: { identifyId: string; name: string }[];
   filaments: RawFilament[];
+}
+
+interface SlicePlateConfig {
+  metadata?: { key: string; value: string } | { key: string; value: string }[];
+  object?: { identify_id: string; name: string } | { identify_id: string; name: string }[];
+  filament?: {
+    id: string;
+    type: string;
+    color: string;
+    used_m: string;
+    used_g: string;
+    used_for_object?: string;
+    used_for_support?: string;
+    tray_info_idx?: string;
+  } | {
+    id: string;
+    type: string;
+    color: string;
+    used_m: string;
+    used_g: string;
+    used_for_object?: string;
+    used_for_support?: string;
+    tray_info_idx?: string;
+  }[];
 }
 
 function toFilamentUsage(filament: RawFilament): FilamentUsage {
@@ -106,10 +132,14 @@ function parseTraySlotMap(gcode: string): string[] {
   return match ? match[1].split(";").map((v) => v.trim()) : [];
 }
 
-function parseSliceInfoConfig(xml: string): SliceInfo {
+function parseSliceInfoConfig(xml: string, plateIndex?: number): SliceInfo {
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
   const doc = parser.parse(xml);
-  const plate = doc?.config?.plate ?? {};
+  const plateEntries = toArray<SlicePlateConfig>(doc?.config?.plate);
+  const plate = plateEntries.find((entry) => {
+    const metadata = toArray(entry.metadata);
+    return metadata.some((item) => item.key === "index" && Number(item.value) === plateIndex);
+  }) ?? plateEntries[0] ?? {};
   const metadataArr = toArray<{ key: string; value: string }>(plate.metadata);
   const metadata: Record<string, string> = {};
   for (const m of metadataArr) metadata[m.key] = m.value;
@@ -140,12 +170,30 @@ function parseSliceInfoConfig(xml: string): SliceInfo {
   }));
 
   return {
+    plateIndex: Number(metadata.index) > 0 ? Number(metadata.index) : plateIndex ?? 1,
+    plateName: metadata.plate_name ?? metadata.name ?? objects[0]?.name ?? null,
     plateWeight: metadata.weight ? parseFloat(metadata.weight) : null,
     predictionSeconds: metadata.prediction ? parseInt(metadata.prediction, 10) : null,
     printerModelId: metadata.printer_model_id ?? null,
     objects,
     filaments,
   };
+}
+
+function getSlicePlateHeaders(xml: string): { plateIndex: number; plateName: string | null }[] {
+  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
+  const plates = toArray<SlicePlateConfig>(parser.parse(xml)?.config?.plate);
+  return plates.map((plate, index) => {
+    const metadata = Object.fromEntries(
+      toArray(plate.metadata).map(({ key, value }) => [key, value])
+    );
+    const parsedIndex = Number(metadata.index);
+    const firstObjectName = toArray(plate.object)[0]?.name;
+    return {
+      plateIndex: Number.isSafeInteger(parsedIndex) && parsedIndex > 0 ? parsedIndex : index + 1,
+      plateName: metadata.plate_name ?? metadata.name ?? firstObjectName ?? null,
+    };
+  }).sort((left, right) => left.plateIndex - right.plateIndex);
 }
 
 const CATEGORY_ORDER: PartCategory[] = ["model", "support", "tower", "other"];
@@ -182,17 +230,20 @@ function transformPoint(point: [number, number, number], transforms: number[][])
 }
 
 /** Extracts build meshes from a 3MF archive for the optional interactive preview. */
-export function parse3mfGeometry(buffer: Buffer): ModelGeometry | null {
-  const steps = geometrySteps(buffer);
+export function parse3mfGeometry(buffer: Buffer, plateIndex?: number): ModelGeometry | null {
+  const steps = geometrySteps(buffer, plateIndex);
   let step = steps.next();
   while (!step.done) step = steps.next();
   return step.value;
 }
 
-export function* geometrySteps(buffer: Buffer): Generator<void, ModelGeometry | null> {
+export function* geometrySteps(buffer: Buffer, plateIndex?: number): Generator<void, ModelGeometry | null> {
   const zip = new AdmZip(buffer);
   function* toolpathFallback(): Generator<void, ModelGeometry | null> {
-    const entry = findEntry(zip, (name) => /plate_\d+\.gcode$/.test(name));
+    const matcher = plateIndex === undefined
+      ? (name: string) => /plate_\d+\.gcode$/i.test(name)
+      : (name: string) => new RegExp(`plate_${plateIndex}\\.gcode$`, "i").test(name);
+    const entry = findEntry(zip, matcher);
     return entry ? yield* gcodeGeometrySteps(entry.getData().toString("utf-8")) : null;
   }
   const toolpathGeometry = yield* toolpathFallback();
@@ -254,21 +305,47 @@ export function* geometrySteps(buffer: Buffer): Generator<void, ModelGeometry | 
 
 export async function parse3mf(buffer: Buffer, fileName: string): Promise<ParsedPrint> {
   const zip = new AdmZip(buffer);
-
-  const sliceInfoEntry = findEntry(zip, (n) => n.endsWith("slice_info.config"));
-  const gcodeEntry = findEntry(zip, (n) => /plate_\d+\.gcode$/.test(n));
-  const thumbEntry = findEntry(
-    zip,
-    (n) => /plate_\d+\.png$/.test(n) && !n.includes("small") && !n.includes("no_light")
-  );
-
+  const sliceInfoEntry = findEntry(zip, (name) => name.endsWith("slice_info.config"));
   if (!sliceInfoEntry) {
     throw new Error(
       "Diese Datei enthält keine unterstützten Bambu Studio / OrcaSlicer Slicing-Metadaten (slice_info.config)."
     );
   }
 
-  const sliceInfo = parseSliceInfoConfig(sliceInfoEntry.getData().toString("utf-8"));
+  const xml = sliceInfoEntry.getData().toString("utf-8");
+  const headers = getSlicePlateHeaders(xml);
+  const plates: ParsedPlate[] = [];
+  for (const { plateIndex, plateName } of headers) {
+    const parsed = await parseSinglePlate(buffer, plateIndex);
+    plates.push({ ...parsed, plateIndex, plateName: plateName ?? parsed.plateName });
+  }
+  if (plates.length === 0) {
+    throw new Error("Die Datei enthält keine auswertbaren Druckplatten.");
+  }
+
+  const first = plates[0];
+  return {
+    id: randomUUID(),
+    fileName,
+    displayName: fileName,
+    createdAt: new Date().toISOString(),
+    plate: first,
+    ...(plates.length > 1 ? { plates } : {}),
+  };
+}
+
+async function parseSinglePlate(buffer: Buffer, plateIndex: number): Promise<ParsedPlate> {
+  const zip = new AdmZip(buffer);
+
+  const sliceInfoEntry = findEntry(zip, (n) => n.endsWith("slice_info.config"));
+  const gcodeEntry = findEntry(zip, (n) => new RegExp(`plate_${plateIndex}\\.gcode$`, "i").test(n));
+  const thumbEntry = findEntry(
+    zip,
+    (n) => new RegExp(`plate_${plateIndex}\\.png$`, "i").test(n) && !n.includes("small") && !n.includes("no_light")
+  );
+
+  if (!sliceInfoEntry) throw new Error("slice_info.config is missing.");
+  const sliceInfo = parseSliceInfoConfig(sliceInfoEntry.getData().toString("utf-8"), plateIndex);
   if (!gcodeEntry) {
     const filaments = sliceInfo.filaments.map(toFilamentUsage);
     const totalWeightGrams =
@@ -294,29 +371,25 @@ export async function parse3mf(buffer: Buffer, fileName: string): Promise<Parsed
       ? `data:image/png;base64,${thumbEntry.getData().toString("base64")}`
       : null;
     return {
-      id: randomUUID(),
-      fileName,
-      displayName: fileName,
-      createdAt: new Date().toISOString(),
-      plate: {
-        totalWeightGrams,
-        printTimeSeconds,
-        totalPrintTimeSeconds: printTimeSeconds,
-        layerCount: 0,
-        nozzleDiameterMm: null,
-        printerModelId: sliceInfo.printerModelId,
-        bedType: null,
-        hasGcode: false,
-        filaments,
-        objects: [],
-        categoryTotals: [],
-        categoryByFilament: filaments.map((filament) => ({
-          filamentId: filament.filamentId,
-          categories: [],
-          totalGrams: filament.usedGramsTotal,
-        })),
-        thumbnailBase64,
-      },
+      plateIndex: sliceInfo.plateIndex,
+      plateName: sliceInfo.plateName ?? `Platte ${sliceInfo.plateIndex}`,
+      totalWeightGrams,
+      printTimeSeconds,
+      totalPrintTimeSeconds: printTimeSeconds,
+      layerCount: 0,
+      nozzleDiameterMm: null,
+      printerModelId: sliceInfo.printerModelId,
+      bedType: null,
+      hasGcode: false,
+      filaments,
+      objects: [],
+      categoryTotals: [],
+      categoryByFilament: filaments.map((filament) => ({
+        filamentId: filament.filamentId,
+        categories: [],
+        totalGrams: filament.usedGramsTotal,
+      })),
+      thumbnailBase64,
     };
   }
 
@@ -463,6 +536,8 @@ export async function parse3mf(buffer: Buffer, fileName: string): Promise<Parsed
   });
 
   const plate: ParsedPlate = {
+    plateIndex: sliceInfo.plateIndex,
+    plateName: sliceInfo.plateName ?? `Platte ${sliceInfo.plateIndex}`,
     totalWeightGrams,
     printTimeSeconds: header.modelPrintTimeSeconds,
     totalPrintTimeSeconds: header.totalEstimatedTimeSeconds || header.modelPrintTimeSeconds,
@@ -478,11 +553,5 @@ export async function parse3mf(buffer: Buffer, fileName: string): Promise<Parsed
     thumbnailBase64,
   };
 
-  return {
-    id: randomUUID(),
-    fileName,
-    displayName: fileName,
-    createdAt: new Date().toISOString(),
-    plate,
-  };
+  return plate;
 }

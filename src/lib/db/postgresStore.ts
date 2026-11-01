@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
-import { defaultSettings, migrateSettings, type DataStore } from "./shared";
+import { defaultSettings, migrateSettings, printModelKey, type DataStore } from "./shared";
 
 async function ensureSchema(pool: Pool): Promise<void> {
   await pool.query(`
@@ -90,24 +90,36 @@ export function createPostgresStore(connectionString?: string): DataStore {
     return rows[0] ? (JSON.parse(rows[0].data) as ParsedPrint) : null;
   }
 
-  async function savePrintModel(id: string, model: Buffer): Promise<void> {
+  async function savePrintModel(id: string, model: Buffer, plateIndex?: number): Promise<void> {
     await ready;
     await pool.query(
       "INSERT INTO print_models (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data",
-      [id, model]
+      [printModelKey(id, plateIndex), model]
     );
   }
 
-  async function getPrintModel(id: string): Promise<Buffer | null> {
+  async function getPrintModel(id: string, plateIndex?: number): Promise<Buffer | null> {
     await ready;
-    const { rows } = await pool.query<{ data: Buffer }>("SELECT data FROM print_models WHERE id = $1", [id]);
+    const { rows } = await pool.query<{ data: Buffer }>("SELECT data FROM print_models WHERE id = $1", [printModelKey(id, plateIndex)]);
     return rows[0]?.data ?? null;
+  }
+
+  async function listPrintModels(id: string): Promise<{ plateIndex: number | null; model: Buffer }[]> {
+    await ready;
+    const { rows } = await pool.query<{ id: string; data: Buffer }>(
+      "SELECT id, data FROM print_models WHERE id = $1 OR id LIKE $2",
+      [id, `${id}:%`]
+    );
+    return rows.map((row) => ({
+      plateIndex: row.id === id ? null : Number(row.id.slice(id.length + 1)),
+      model: row.data,
+    })).filter((row) => row.plateIndex === null || Number.isSafeInteger(row.plateIndex));
   }
 
   async function deletePrint(id: string): Promise<void> {
     await ready;
     await pool.query("DELETE FROM prints WHERE id = $1", [id]);
-    await pool.query("DELETE FROM print_models WHERE id = $1", [id]);
+    await pool.query("DELETE FROM print_models WHERE id = $1 OR id LIKE $2", [id, `${id}:%`]);
   }
 
   async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -147,6 +159,7 @@ export function createPostgresStore(connectionString?: string): DataStore {
     getPrint,
     savePrintModel,
     getPrintModel,
+    listPrintModels,
     updatePrintName,
     deletePrint,
     getPrintCostInputs,

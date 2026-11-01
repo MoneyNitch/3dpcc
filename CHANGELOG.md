@@ -1,5 +1,77 @@
 # Changelog
 
+## v0.7.0 — REST API, multi-plate projects and document previews
+
+### Added
+- **Versioned REST API** under `/api/v1` for prints, 3MF uploads, cost
+  calculation, settings, materials, accessories, printers, invoice/quote
+  templates, and HTML document generation.
+- **Environment-configured API keys** through comma-separated `API_KEYS`,
+  with Bearer authentication. Key management is currently environment-only;
+  without valid configuration, the versioned API remains disabled.
+- **Protected OpenAPI 3.1 documentation and interactive Swagger UI** at
+  `/api/v1/docs`, generated from the API operations and validation schemas.
+  Includes endpoint filtering, larger operation cards and inputs, responsive
+  layout, and light/dark styling. Assets are served locally without a CDN.
+- **Multi-plate project support**: select individual plates with their own
+  metadata, thumbnails and 3D previews, calculate all plates together, or create
+  individual saved plate prints without duplicating existing linked prints.
+- **Editable plate names** in print details and through the API, persisted
+  per print and used in invoice/quote positions.
+- **Original archive downloads**, enabled through Settings → General.
+  New uploads can be retained and downloaded unchanged from print details or
+  the API, independently of 3D preview generation.
+- **Invoice and quote previews** with current print, cost and customer data,
+  directly in the export dialog without printing or advancing document numbering.
+- **Quantity discounts** with a configurable threshold and percentage, applied
+  before tax. Defaults are 5% from a quantity of 5; the discount row can be
+  shown or omitted in exported documents without changing the final total.
+- **Company sender details** in Settings → General for shared use by invoice
+  and quote templates.
+- **Print ID display** in small text on the print detail page.
+- [API setup and usage documentation](./docs/api.md), plus tests for API
+  authentication, validation, persistence, original downloads and plate renaming.
+
+### Changed
+- Project-wide calculations sum plate-specific material, energy and machine
+  costs while applying shared labor, packaging and extra costs once per project
+  copy. A measured energy override applies to the entire selected project.
+- Invoice/quote exports can list selected plates as individual positions with
+  allocated amounts. Compact tables move following template elements when
+  additional rows exceed the configured table height.
+- Cost breakdown amounts now reflect the configured quantity consistently.
+- Settings navigation groups document numbering and database configuration
+  into dedicated tabs.
+- API requests use validated input schemas, bounded request sizes, pagination
+  for print lists, explicit error responses and private, non-cached responses.
+- Docker Compose forwards `API_KEYS`; standalone builds include local Swagger
+  assets. Existing settings and saved prints remain compatible through defaults
+  and fallbacks for new fields.
+
+### Fixed
+- Missing German and English upload confirmation texts, including the button
+  previously displaying `upload.submit` and the print-name input labels.
+- Narrow Swagger endpoint layout caused by login styles affecting the
+  documentation content area.
+- Selection of older saved plates without explicit plate indices.
+
+### Notes
+- API-key protection applies **only to `/api/v1`**, not to the existing
+  application UI or internal endpoints. Continue using 3D-PCC on a trusted
+  private network; this release does not add global application authentication.
+- Original retention is **off by default**. Older uploads must be uploaded again
+  with retention enabled. Disabling it keeps retained files but blocks downloads
+  and stops retaining new uploads; deleting a print removes its original.
+  Back up `data/original-archives/` alongside the database, including when using
+  PostgreSQL or MySQL/MariaDB.
+- Linked plate prints download the complete source archive while it exists.
+  Renaming a plate does not modify the original archive or separately saved
+  plate prints.
+- Re-upload older projects to generate missing per-plate preview data.
+- API-generated invoices and quotes are printable HTML, not archived documents
+  or server-generated PDFs. The caller supplies the document number; API
+  generation does not consume numbering counters.
+
 ## v0.6.1 — Installation and support export fixes
 
 ### Changed

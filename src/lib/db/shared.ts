@@ -10,12 +10,17 @@ export interface DataStore {
   savePrint(print: ParsedPrint): Promise<void>;
   listPrints(): Promise<ParsedPrint[]>;
   getPrint(id: string): Promise<ParsedPrint | null>;
-  savePrintModel(id: string, model: Buffer): Promise<void>;
-  getPrintModel(id: string): Promise<Buffer | null>;
+  savePrintModel(id: string, model: Buffer, plateIndex?: number): Promise<void>;
+  getPrintModel(id: string, plateIndex?: number): Promise<Buffer | null>;
+  listPrintModels(id: string): Promise<{ plateIndex: number | null; model: Buffer }[]>;
   updatePrintName(id: string, displayName: string): Promise<void>;
   deletePrint(id: string): Promise<void>;
   getPrintCostInputs(id: string): Promise<PrintCostInputs | null>;
   savePrintCostInputs(id: string, inputs: PrintCostInputs): Promise<void>;
+}
+
+export function printModelKey(id: string, plateIndex?: number): string {
+  return plateIndex === undefined ? id : `${id}:${plateIndex}`;
 }
 
 export const defaultSettings: AppSettings = {
@@ -81,7 +86,14 @@ export const defaultSettings: AppSettings = {
     language: "de",
     currency: "EUR",
     enable3dPreview: true,
+    retainOriginalArchives: false,
     previewComputePercent: 25,
+    companyName: "",
+    companyAddress: "",
+    companyEmail: "",
+    companyPhone: "",
+    companyTaxId: "",
+    companyIban: "",
   },
   customLanguagePacks: [],
   numbering: {
@@ -109,11 +121,26 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (result.general.enable3dPreview === undefined) {
     result = { ...result, general: { ...result.general, enable3dPreview: defaultSettings.general.enable3dPreview } };
   }
+  if (result.general.retainOriginalArchives === undefined) {
+    result = { ...result, general: { ...result.general, retainOriginalArchives: defaultSettings.general.retainOriginalArchives } };
+  }
   if (result.general.language === undefined) {
     result = { ...result, general: { ...result.general, language: defaultSettings.general.language } };
   }
   if (result.general.previewComputePercent === undefined) {
     result = { ...result, general: { ...result.general, previewComputePercent: defaultSettings.general.previewComputePercent } };
+  }
+  for (const field of [
+    "companyName",
+    "companyAddress",
+    "companyEmail",
+    "companyPhone",
+    "companyTaxId",
+    "companyIban",
+  ] as const) {
+    if (typeof result.general[field] !== "string") {
+      result = { ...result, general: { ...result.general, [field]: "" } };
+    }
   }
   if (!isCurrencyCode(result.general.currency)) {
     result = { ...result, general: { ...result.general, currency: defaultSettings.general.currency } };

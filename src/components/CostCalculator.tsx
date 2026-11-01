@@ -2,20 +2,20 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import type { AppSettings, ParsedPlate } from "@/lib/types";
-import { calculateCost, findFilamentPrice, findPrinter } from "@/lib/costCalculator";
+import type { AppSettings } from "@/lib/types";
+import { calculateAllPlatesCost, calculateCost, findFilamentPrice, findPrinter } from "@/lib/costCalculator";
 import { externalSpoolKey, type ExternalSpoolResult } from "@/lib/externalFilaments";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol, getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
+import { usePlateSelection } from "@/lib/plateSelectionContext";
 
 export function CostCalculator({
-  plate,
   settings,
 }: {
-  plate: ParsedPlate;
   settings: AppSettings;
 }) {
+  const { plates, plate, allSelected } = usePlateSelection();
   const { inputs, update, save, saved, saveError } = useCostInputs();
   const { t, money, currency, lang } = useLocale();
   const [spoolResults, setSpoolResults] = useState<ExternalSpoolResult[] | null>(null);
@@ -32,7 +32,27 @@ export function CostCalculator({
   const parseDecimal = (value: string) =>
     parseLocalizedNumber(value, lang) || 0;
 
-  const result = useMemo(() => calculateCost(plate, settings, inputs), [plate, settings, inputs]);
+  const result = useMemo(
+    () => allSelected
+      ? calculateAllPlatesCost(plates, settings, inputs)
+      : calculateCost(plate, settings, inputs),
+    [allSelected, plates, plate, settings, inputs]
+  );
+  const costFilaments = useMemo(() => {
+    if (!allSelected) return plate.filaments;
+    const totals = new Map<string, (typeof plate.filaments)[number]>();
+    for (const item of plates.flatMap((item) => item.filaments)) {
+      const key = `${item.filamentId}\0${item.type}\0${item.color}`;
+      const existing = totals.get(key);
+      if (existing) {
+        existing.usedGramsTotal += item.usedGramsTotal;
+        existing.usedMetersTotal += item.usedMetersTotal;
+      } else {
+        totals.set(key, { ...item });
+      }
+    }
+    return [...totals.values()];
+  }, [allSelected, plates, plate]);
 
   const inputClass =
     "mt-1 min-w-0 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
@@ -72,7 +92,10 @@ export function CostCalculator({
   }
 
   const printer = findPrinter(settings, inputs.printerId);
-  const estimatedKwh = (printer.powerConsumptionW / 1000) * (plate.totalPrintTimeSeconds / 3600);
+  const totalPrintTimeSeconds = allSelected
+    ? plates.reduce((total, item) => total + item.totalPrintTimeSeconds, 0)
+    : plate.totalPrintTimeSeconds;
+  const estimatedKwh = (printer.powerConsumptionW / 1000) * (totalPrintTimeSeconds / 3600);
   const usesManualEnergy = inputs.energyKwhOverride !== null;
 
   return (
@@ -115,7 +138,7 @@ export function CostCalculator({
         {spoolResults?.length === 0 && <Link href="/settings" className="text-xs text-orange-600 hover:underline dark:text-orange-400">{t("filamentDb.configure")}</Link>}
         {spoolResults && spoolResults.length > 0 && spools.length === 0 && !spoolResults.some((result) => result.error) &&
           <p className="text-xs text-slate-500 dark:text-slate-400">{t("filamentDb.empty")}</p>}
-        {plate.filaments.map((f) => {
+        {costFilaments.map((f) => {
           const price = findFilamentPrice(f, settings, inputs);
           const selected = inputs.externalSpools?.[f.filamentId];
           const selectedKey = selected ? externalSpoolKey(selected) : "";
@@ -221,6 +244,28 @@ export function CostCalculator({
           />
         </label>
         <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+          {t("cost.quantityDiscountThreshold")}
+          <input
+            type="number"
+            min={1}
+            value={inputs.quantityDiscountThreshold}
+            onChange={(e) => update("quantityDiscountThreshold", Math.max(1, parseInt(e.target.value) || 1))}
+            className={inputClass}
+          />
+        </label>
+        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+          {t("cost.quantityDiscountPercent")} (%)
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step="0.1"
+            value={inputs.quantityDiscountPercent}
+            onChange={(e) => update("quantityDiscountPercent", Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+            className={inputClass}
+          />
+        </label>
+        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
           {t("cost.laborMinutes")}
           <input
             type="text"
@@ -299,6 +344,12 @@ export function CostCalculator({
           <span>{t("cost.margin")} ({inputs.marginPercent}%)</span>
           <span>{money(result.marginAmount)}</span>
         </div>
+        {result.quantityDiscountAmount > 0 && (
+          <div className="flex justify-between text-green-700 dark:text-green-400">
+            <span>{t("cost.quantityDiscount")} ({result.quantityDiscountPercent}%)</span>
+            <span>−{money(result.quantityDiscountAmount)}</span>
+          </div>
+        )}
         <div className="flex justify-between text-slate-600 dark:text-slate-300">
           <span>{t("cost.tax")} ({inputs.vatPercent}%)</span>
           <span>{money(result.vatAmount)}</span>

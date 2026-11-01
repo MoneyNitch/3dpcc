@@ -22,13 +22,29 @@ tower and total) and multi-color information, and calculates print costs.
 
 ## Features
 
+- Versioned REST API with environment-configured API keys and a protected,
+  locally served Swagger/OpenAPI view at `/api/v1/docs`.
+  See [API documentation](./docs/api.md) for setup, endpoints and examples.
+  This protects only `/api/v1`, not the existing UI or internal endpoints.
+
 - Drag-and-drop upload of `.gcode.3mf` files on desktop and mobile
 - Automatic analysis of total weight, print time, category weights, filament
   colors and types, and objects on the build plate
+- Multi-plate 3MF projects show each plate's data and 2D/3D preview; all plates
+  can also be selected for total project costs or created as individual saved
+  prints after confirmation, and added as separate invoice/quote items
+- Select a plate in print details and choose **Rename plate** to save a custom
+  name (up to 200 characters). Names appear in previews and document positions.
+  Renaming does not change separately saved plate prints or the original archive.
 - Local SQLite storage for all prints in `data/3d-pcc.db`
 - Cost calculator for material, electricity, machine wear, labor, packaging,
   profit margin and tax
 - Configurable material prices, printer profiles and cost settings
+- Company sender details for invoice and quote templates are configured under
+  **Settings → General**
+- Invoice and quote export dialogs offer a preview with the current print,
+  costs and customer details before downloading or printing. Previewing does
+  not advance the document numbering counter; return to details to edit it.
 - Read-only Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
 - Interactive 3D preview: embedded model meshes when available, otherwise a
@@ -36,12 +52,28 @@ tower and total) and multi-color information, and calculates print costs.
   as solid filament strands with slicer-provided widths and layer heights.
   No depositing segments are sampled or dropped. Toolpaths are not the original
   surface model and cannot exactly reproduce the slicer's thumbnail.
-  The first matching G-code plate is displayed; travel and custom machine
-  routines are excluded. Re-upload older prints to replace sampled preview data.
+  Each sliced plate has its own G-code preview; travel and custom machine
+  routines are excluded. Re-upload older prints to generate per-plate previews.
   Disable **Enable 3D preview** under **Settings > General** to show only 2D
   images and skip generating 3D data on new uploads. Existing preview data is
   retained. Prints uploaded while disabled require another upload for 3D after
   re-enabling the setting.
+
+### Original archive downloads
+
+Enable **Settings > General > Retain original files and allow downloads** to
+keep new `.3mf` / `.gcode.3mf` uploads for later download from print details or
+`GET /api/v1/prints/{id}/download` (API key required). This is off by default;
+older uploads need to be uploaded again after enabling it.
+Disabling retention keeps existing files but blocks downloads and stops retaining
+new uploads. Deleting a print removes its original; linked individual plate
+prints download the complete source archive while the source print exists.
+
+Original bytes are stored in `data/original-archives/`, independently of the
+temporary 3D queue, even when PostgreSQL/MySQL is used or 3D previews are disabled.
+Allow sufficient disk space, preserve write permissions, and back up this
+directory with the database. Backend transfers on the same instance retain this
+local directory; moving to another host requires copying it as well.
 
 ### Background 3D calculation on slower systems
 

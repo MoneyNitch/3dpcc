@@ -1,6 +1,6 @@
 {
   "name": "3d-pcc",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "engines": {
     "node": ">=22"
@@ -19,7 +19,8 @@
     "start:background": "node scripts/start-background.js",
     "start:production": "npm run build && npm run start",
     "start:production:background": "npm run build && npm run start:background",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:api": "tsx --test src/lib/api/*.test.ts"
   },
   "dependencies": {
     "adm-zip": "^0.6.0",
@@ -31,6 +32,7 @@
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "swagger-ui-dist": "^5.30.2",
     "uuid": "^14.0.2",
     "zod": "^4.5.4"
   },
@@ -47,6 +49,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsx": "^4.20.0"
   }
 }

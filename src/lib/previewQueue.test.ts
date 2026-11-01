@@ -39,7 +39,9 @@ async function fixture() {
     workerFile,
     getSettings: async () => settings,
     printExists: async (id: string) => prints.has(id),
-    saveModel: async (id: string, data: Buffer) => { saved.set(id, data); },
+    saveModel: async (id: string, data: Buffer, plateIndex?: number) => {
+      saved.set(plateIndex === undefined ? id : `${id}:${plateIndex}`, data);
+    },
   };
   const queue = new PreviewQueue(dependencies);
   return { directory, prints, saved, settings, dependencies, queue };
@@ -70,20 +72,44 @@ test("persists queued uploads and finishes one job at a time with complete geome
   }
 });
 
+test("computes and persists a distinct preview model for each requested plate", async () => {
+  const f = await fixture();
+  const id = randomUUID();
+  const zip = new AdmZip();
+  for (const [index, x] of [[1, 10], [2, 20]] as const) {
+    zip.addFile(`Metadata/plate_${index}.gcode`, Buffer.from(
+      `; FEATURE: Outer wall\nG1 X${x} Y0 Z0.2 E1\n`,
+    ));
+  }
+  try {
+    f.prints.add(id);
+    await f.queue.enqueue(id, zip.toBuffer(), [1, 2]);
+    await f.queue.tick();
+    await eventually(async () => f.saved.has(`${id}:1`) && f.saved.has(`${id}:2`));
+
+    const first = JSON.parse(gunzipSync(f.saved.get(`${id}:1`)!).toString()) as ModelGeometry;
+    const second = JSON.parse(gunzipSync(f.saved.get(`${id}:2`)!).toString()) as ModelGeometry;
+    assert.notDeepEqual(first.positions, second.positions);
+  } finally {
+    await f.queue.stop();
+    await rm(f.directory, { recursive: true, force: true });
+  }
+});
+
 test("restarts an interrupted job from its retained original archive", async () => {
   const f = await fixture();
   const id = randomUUID();
   let restarted: PreviewQueue | undefined;
   try {
     f.prints.add(id);
-    await f.queue.enqueue(id, archive(1000));
+    await f.queue.enqueue(id, archive(1000), [1]);
     await f.queue.tick();
     await f.queue.stop();
     assert.equal(await f.queue.status(id), "running");
     assert.ok((await readFile(path.join(f.directory, id, "source.3mf"))).length);
     restarted = new PreviewQueue(f.dependencies);
     await restarted.tick();
-    await eventually(async () => f.saved.has(id));
+    await eventually(async () => f.saved.has(`${id}:1`));
     await eventually(async () => await restarted!.status(id) === null);
   } finally {
     await f.queue.stop();

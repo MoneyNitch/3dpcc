@@ -9,13 +9,14 @@ type JobStatus = "queued" | "running" | "error" | "unavailable";
 interface PreviewJob {
   status: JobStatus;
   createdAt: string;
+  plateIndices?: number[];
 }
 interface QueueDependencies {
   directory: string;
   workerFile: string;
   getSettings(): Promise<AppSettings>;
   printExists(id: string): Promise<boolean>;
-  saveModel(id: string, data: Buffer): Promise<void>;
+  saveModel(id: string, data: Buffer, plateIndex?: number): Promise<void>;
 }
 
 function isMissing(error: unknown): boolean {
@@ -75,7 +76,15 @@ export class PreviewQueue {
         !isJobStatus(job.status) || !("createdAt" in job) || typeof job.createdAt !== "string") {
         throw new Error(`Invalid preview job state for ${id}.`);
       }
-      return { status: job.status, createdAt: job.createdAt };
+      if ("plateIndices" in job && (!Array.isArray(job.plateIndices) ||
+        !job.plateIndices.every((index) => Number.isSafeInteger(index) && index > 0))) {
+        throw new Error(`Invalid preview plate indexes for ${id}.`);
+      }
+      return {
+        status: job.status,
+        createdAt: job.createdAt,
+        ...("plateIndices" in job ? { plateIndices: job.plateIndices as number[] } : {}),
+      };
     } catch (error) {
       if (isMissing(error)) return null;
       throw error;
@@ -86,18 +95,27 @@ export class PreviewQueue {
     return (await this.readJob(id))?.status ?? null;
   }
 
-  async enqueue(id: string, source: Buffer) {
+  async enqueue(id: string, source: Buffer, plateIndices?: number[]) {
     return this.exclusive(async () => {
       await mkdir(this.directory(id), { recursive: true });
       await writeFile(path.join(this.directory(id), "source.3mf"), source);
-      await this.saveJob(id, { status: "queued", createdAt: new Date().toISOString() });
+      await this.saveJob(id, {
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        ...(plateIndices ? { plateIndices } : {}),
+      });
     });
   }
 
   async retry(id: string) {
     return this.exclusive(async () => {
-      if (await this.status(id) !== "error") throw new Error("Only failed preview jobs can be retried.");
-      await this.saveJob(id, { status: "queued", createdAt: new Date().toISOString() });
+      const job = await this.readJob(id);
+      if (job?.status !== "error") throw new Error("Only failed preview jobs can be retried.");
+      await this.saveJob(id, {
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        ...(job.plateIndices ? { plateIndices: job.plateIndices } : {}),
+      });
     });
   }
 
@@ -121,7 +139,8 @@ export class PreviewQueue {
       if (!entry.isDirectory()) continue;
       const job = await this.readJob(entry.name);
       if (job) jobs.push({
-        id: entry.name, ...job,
+        id: entry.name,
+        ...job,
         status: job.status === "running" && this.active?.id !== entry.name ? "queued" : job.status,
       });
     }
@@ -203,7 +222,11 @@ export class PreviewQueue {
           await this.cancelJob(job.id);
           continue;
         }
-        await this.saveJob(job.id, { status: "running", createdAt: job.createdAt });
+        await this.saveJob(job.id, {
+          status: "running",
+          createdAt: job.createdAt,
+          ...(job.plateIndices ? { plateIndices: job.plateIndices } : {}),
+        });
         if (this.stopped) return;
         const sharedBudget = new SharedArrayBuffer(8);
         const budget = new Int32Array(sharedBudget);
@@ -213,17 +236,22 @@ export class PreviewQueue {
           source: path.join(directory, "source.3mf"),
           output: path.join(directory, "result.gz"),
           budget: sharedBudget,
+          ...(job.plateIndices ? { plateIndices: job.plateIndices } : {}),
         };
         let worker: Worker;
         try {
           worker = new Worker(this.dependencies.workerFile, { workerData });
         } catch (error) {
           console.error(`Could not start preview worker for ${job.id}:`, error);
-          await this.saveJob(job.id, { status: "error", createdAt: job.createdAt });
+          await this.saveJob(job.id, {
+            status: "error",
+            createdAt: job.createdAt,
+            ...(job.plateIndices ? { plateIndices: job.plateIndices } : {}),
+          });
           continue;
         }
         this.active = { id: job.id, worker, budget };
-        this.pending = this.complete(job.id, job.createdAt, worker);
+        this.pending = this.complete(job.id, job.createdAt, worker, job.plateIndices);
         break;
       }
     } catch (error) {
@@ -237,13 +265,17 @@ export class PreviewQueue {
     }
   }
 
-  private async complete(id: string, createdAt: string, worker: Worker) {
+  private async complete(id: string, createdAt: string, worker: Worker, plateIndices?: number[]) {
     try {
-      const available = await new Promise<boolean>((resolve, reject) => {
-        let result: boolean | undefined;
+      const availablePlateIndices = await new Promise<(number | null)[]>((resolve, reject) => {
+        let result: (number | null)[] | undefined;
         worker.once("message", (message: unknown) => {
-          if (message && typeof message === "object" && "available" in message && typeof message.available === "boolean") {
-            result = message.available;
+          if (message && typeof message === "object" && "available" in message &&
+            typeof message.available === "boolean" && "plateIndices" in message &&
+            Array.isArray(message.plateIndices) &&
+            message.plateIndices.every((index) => index === null ||
+              (Number.isSafeInteger(index) && index > 0))) {
+            result = message.plateIndices as (number | null)[];
           }
         });
         worker.once("error", reject);
@@ -256,11 +288,22 @@ export class PreviewQueue {
         if (this.active?.worker !== worker) return;
         if (!await this.dependencies.printExists(id)) {
           await rm(this.directory(id), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-        } else if (available) {
-          await this.dependencies.saveModel(id, await readFile(path.join(this.directory(id), "result.gz")));
+        } else if (availablePlateIndices.length > 0) {
+          for (const plateIndex of availablePlateIndices) {
+            const suffix = plateIndex === null ? "" : `.${plateIndex}`;
+            await this.dependencies.saveModel(
+              id,
+              await readFile(path.join(this.directory(id), `result.gz${suffix}`)),
+              plateIndex ?? undefined,
+            );
+          }
           await rm(this.directory(id), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
         } else {
-          await this.saveJob(id, { status: "unavailable", createdAt });
+          await this.saveJob(id, {
+            status: "unavailable",
+            createdAt,
+            ...(plateIndices ? { plateIndices } : {}),
+          });
           await rm(path.join(this.directory(id), "source.3mf"), { force: true });
         }
         this.active = undefined;
@@ -270,7 +313,11 @@ export class PreviewQueue {
         if (this.active?.worker !== worker) return;
         console.error(`Preview job ${id} failed:`, error);
         try {
-          await this.saveJob(id, { status: "error", createdAt });
+          await this.saveJob(id, {
+            status: "error",
+            createdAt,
+            ...(plateIndices ? { plateIndices } : {}),
+          });
         } catch (stateError) {
           console.error(`Could not persist preview failure for ${id}:`, stateError);
         }

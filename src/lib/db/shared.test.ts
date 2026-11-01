@@ -11,7 +11,20 @@ test("migrates older settings without changing language or currency", () => {
     ...defaultSettings,
     general: { language: "en", currency: "USD" },
   });
-  assert.deepEqual(settings.general, { language: "en", currency: "USD", enable3dPreview: true, previewComputePercent: 25 });
+  assert.deepEqual(settings.general, {
+    ...defaultSettings.general,
+    language: "en",
+    currency: "USD",
+  });
+});
+
+test("migrates invoice sender details and preserves configured values", () => {
+  const settings = migrateSettings({
+    ...defaultSettings,
+    general: { ...defaultSettings.general, companyName: "Example Studio" },
+  });
+  assert.equal(settings.general.companyName, "Example Studio");
+  assert.equal(settings.general.companyAddress, "");
 });
 
 test("preserves disabled 3D previews across saving and migration", () => {

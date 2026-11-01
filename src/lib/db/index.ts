@@ -1,6 +1,7 @@
 import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
 import { resolveDbConnection, type ResolvedDbConnection } from "../dbConfig";
 import type { DataStore } from "./shared";
+import { originalArchives } from "../originalArchives";
 
 // The active backend is resolved from the DB config saved via Settings (data/db-config.json),
 // falling back to DB_DRIVER/DATABASE_URL env vars if nothing was saved there yet.
@@ -83,7 +84,8 @@ export async function updatePrintName(id: string, displayName: string): Promise<
 }
 
 export async function deletePrint(id: string): Promise<void> {
-  return (await getStore()).deletePrint(id);
+  await originalArchives.remove(id);
+  await (await getStore()).deletePrint(id);
 }
 
 export async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {

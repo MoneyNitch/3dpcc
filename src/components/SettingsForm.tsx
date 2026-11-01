@@ -575,6 +575,17 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
           )}
         </div>
         <label className="mt-4 flex items-start gap-3 text-sm text-slate-700 dark:text-slate-200">
+          <input type="checkbox" checked={settings.general.retainOriginalArchives}
+            onChange={(event) => updateGeneral({ retainOriginalArchives: event.target.checked })}
+            aria-describedby="original-archive-description" className="mt-1 h-4 w-4 accent-orange-500" />
+          <span>
+            <span className="font-medium">{t("settings.retainOriginalArchives")}</span>
+            <span id="original-archive-description" className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+              {t("settings.retainOriginalArchivesHelp")}
+            </span>
+          </span>
+        </label>
+        <label className="mt-4 flex items-start gap-3 text-sm text-slate-700 dark:text-slate-200">
           <input
             type="checkbox"
             checked={settings.general.enable3dPreview}

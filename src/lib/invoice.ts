@@ -144,6 +144,7 @@ async function renderElement(
   positionLabels?: InvoicePositionLabels,
   showQuantityDiscount?: boolean,
   quantityDiscountLabel?: string,
+  subtotalLabel?: string,
 ): Promise<string> {
   const text = (value: string) => escapeHtml(fillVariables(value, values));
   const style = `position:absolute;left:${element.x}mm;top:${element.y}mm;width:${element.width}mm;height:${element.height}mm;font-size:${element.fontSize ?? 11}pt;text-align:${element.align ?? "left"};`;
@@ -177,7 +178,7 @@ async function renderElement(
           `<tr><td>${escapeHtml(line.label)}</td><td>${escapeHtml(money(line.amount))}</td></tr>`
       )
       .join("");
-    return `<div ${elementAttributes} style="${style}" class="line-items"><table class="items"><thead><tr><th>Position</th><th>Betrag</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    return `<div ${elementAttributes} style="${style}" class="line-items"><table class="items"><thead><tr><th>${escapeHtml(positionLabels?.item ?? "Position")}</th><th>${escapeHtml(positionLabels?.total ?? "Betrag")}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
   // totals
@@ -200,7 +201,7 @@ async function renderElement(
     ? `<div class="quantity-discount"><span>${escapeHtml(quantityDiscountLabel ?? "Mengenrabatt")} (${result.quantityDiscountPercent} %)</span><span>−${escapeHtml(money(result.quantityDiscountAmount))}</span></div>`
     : "";
 
-  return `<div ${elementAttributes} style="${style}"><div class="totals"><div><span>Zwischensumme</span><span>${escapeHtml(money(subtotal))}</span></div>${marginRow}${discountRow}${taxRow}<div class="total"><span>Gesamt</span><span>${escapeHtml(money(result.totalPrice))}</span></div></div></div>`;
+  return `<div ${elementAttributes} style="${style}"><div class="totals"><div><span>${escapeHtml(subtotalLabel ?? "Zwischensumme")}</span><span>${escapeHtml(money(subtotal))}</span></div>${marginRow}${discountRow}${taxRow}<div class="total"><span>${escapeHtml(positionLabels?.total ?? "Gesamt")}</span><span>${escapeHtml(money(result.totalPrice))}</span></div></div></div>`;
 }
 
 export interface InvoicePositionItem {
@@ -248,6 +249,7 @@ export async function renderInvoiceHtml({
   positionLabels,
   showQuantityDiscount = true,
   quantityDiscountLabel,
+  subtotalLabel,
 }: {
   template: InvoiceTemplate;
   values: Record<string, string>;
@@ -259,6 +261,7 @@ export async function renderInvoiceHtml({
   positionLabels?: InvoicePositionLabels;
   showQuantityDiscount?: boolean;
   quantityDiscountLabel?: string;
+  subtotalLabel?: string;
 }): Promise<string> {
   const size = pageSizeMm(template.paperFormat, template.orientation);
   const body = (
@@ -272,7 +275,8 @@ export async function renderInvoiceHtml({
         positionItems,
         positionLabels,
         showQuantityDiscount,
-        quantityDiscountLabel
+        quantityDiscountLabel,
+        subtotalLabel
       )
     ))
   ).join("");

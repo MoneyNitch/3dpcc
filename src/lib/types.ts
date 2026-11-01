@@ -211,6 +211,7 @@ export interface GeneralSettings {
   language: Language;
   currency: Currency;
   enable3dPreview: boolean;
+  retainOriginalArchives: boolean;
   previewComputePercent: number;
   companyName: string;
   companyAddress: string;

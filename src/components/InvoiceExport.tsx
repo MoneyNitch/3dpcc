@@ -37,6 +37,24 @@ export function InvoiceExport({
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState("");
   const [showQuantityDiscount, setShowQuantityDiscount] = useState(true);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+
+  async function showPreview() {
+    setPreviewLoading(true);
+    setPreviewError(false);
+    try {
+      const html = await buildDocument();
+      if (!html) throw new Error("No document template selected.");
+      setPreviewHtml(html);
+    } catch (error) {
+      console.error("Document preview failed:", error);
+      setPreviewError(true);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
   // Advances the shared counter in Settings so the next document suggests the following number.
   async function bumpNumberingCounter() {
@@ -183,15 +201,33 @@ export function InvoiceExport({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setPreviewHtml(null);
+          setPreviewError(false);
+          setOpen(true);
+        }}
         className="mt-3 w-full rounded-lg border border-orange-500 px-4 py-2 text-sm font-medium text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950/30"
       >
         {t(`${prefix}.export`)}
       </button>
 
       {open && (
-        <Modal title={t(`${prefix}.export`)} onClose={() => setOpen(false)}>
-          <div className="flex flex-col gap-3">
+        <Modal title={t(`${prefix}.export`)} onClose={() => setOpen(false)} wide={previewHtml !== null}>
+          <div className="max-h-[75vh] overflow-y-auto">
+          {previewHtml !== null ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-slate-500 dark:text-slate-400">{t("invoice.previewHelp")}</p>
+                <button type="button" onClick={() => setPreviewHtml(null)}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700">
+                  {t("invoice.backToDetails")}
+                </button>
+              </div>
+              <iframe title={t("invoice.preview")} srcDoc={previewHtml} sandbox="allow-scripts"
+                className="h-[60vh] w-full rounded-lg border border-slate-200 bg-white dark:border-slate-600" />
+            </div>
+          ) : (
+          <fieldset disabled={previewLoading} className="flex min-w-0 flex-col gap-3">
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
               {t("invoice.template")}
               <select
@@ -261,7 +297,12 @@ export function InvoiceExport({
               </label>
             </div>
 
-            <div className="flex justify-end gap-2">
+            {previewError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{t("invoice.previewError")}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" onClick={() => void showPreview()} disabled={!templateId}
+                className="rounded-lg border border-orange-500 px-4 py-2 text-sm font-medium text-orange-600 hover:bg-orange-50 disabled:opacity-50 dark:text-orange-400 dark:hover:bg-orange-950/30">
+                {t(previewLoading ? "invoice.loading" : "invoice.preview")}
+              </button>
               <button
                 type="button"
                 onClick={download}
@@ -277,6 +318,8 @@ export function InvoiceExport({
                 {t("invoice.generate")}
               </button>
             </div>
+          </fieldset>
+          )}
           </div>
         </Modal>
       )}

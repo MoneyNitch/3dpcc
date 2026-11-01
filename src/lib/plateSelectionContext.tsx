@@ -22,7 +22,7 @@ export function PlateSelectionProvider({
 }) {
   const [selectedIndex, setSelectedIndex] = useState(plates[0]?.plateIndex ?? 1);
   const [allSelected, setAllSelected] = useState(false);
-  const plate = plates.find((item) => item.plateIndex === selectedIndex) ?? plates[0];
+  const plate = plates.find((item, index) => (item.plateIndex ?? index + 1) === selectedIndex) ?? plates[0];
   if (!plate) throw new Error("A print must contain at least one plate.");
 
   return (

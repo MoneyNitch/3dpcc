@@ -8,8 +8,27 @@ import {
   listPrints,
   savePrintModel,
   savePrintCostInputs,
+  savePrint,
 } from "@/lib/db";
 import type { ParsedPrint } from "@/lib/types";
+import { renamePlate } from "@/lib/plateNames";
+import { ApiError, errorResponse, readJson } from "@/lib/api/http";
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const body = await readJson(request);
+    const print = await getPrint(id);
+    if (!print) throw new ApiError(404, "not_found", "Print not found.");
+    await savePrint(renamePlate(print, body));
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
 
 export async function POST(
   _request: Request,

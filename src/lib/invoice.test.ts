@@ -52,6 +52,23 @@ test("allocated all-plate invoice positions add up exactly to the selected total
   assert.deepEqual(allocateInvoiceAmounts(10, [0, 0, 0]), [3.33, 3.33, 3.34]);
 });
 
+test("document preview renders current data and layout without triggering printing", async () => {
+  const options = {
+    template,
+    values: { companyName: "Preview company", companyAddress: "Current address", vatPercent: "19" },
+    result: sampleInvoiceResult,
+    money: (value: number) => value.toFixed(2),
+  };
+  const preview = await renderInvoiceHtml(options);
+  assert.match(preview, /Preview company/);
+  assert.match(preview, /Current address/);
+  assert.match(preview, /17\.85/);
+  assert.match(preview, /getBoundingClientRect/);
+  assert.doesNotMatch(preview, /window\.print\(\)/);
+  const printable = await renderInvoiceHtml({ ...options, autoPrint: true });
+  assert.match(printable, /window\.print\(\)/);
+});
+
 test("quantity discount row can be included or omitted without changing the invoice total", async () => {
   const discountResult = {
     ...sampleInvoiceResult,

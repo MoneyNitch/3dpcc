@@ -86,6 +86,7 @@ export const defaultSettings: AppSettings = {
     language: "de",
     currency: "EUR",
     enable3dPreview: true,
+    retainOriginalArchives: false,
     previewComputePercent: 25,
     companyName: "",
     companyAddress: "",
@@ -119,6 +120,9 @@ export function migrateSettings(raw: unknown): AppSettings {
   }
   if (result.general.enable3dPreview === undefined) {
     result = { ...result, general: { ...result.general, enable3dPreview: defaultSettings.general.enable3dPreview } };
+  }
+  if (result.general.retainOriginalArchives === undefined) {
+    result = { ...result, general: { ...result.general, retainOriginalArchives: defaultSettings.general.retainOriginalArchives } };
   }
   if (result.general.language === undefined) {
     result = { ...result, general: { ...result.general, language: defaultSettings.general.language } };

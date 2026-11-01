@@ -14,6 +14,8 @@ import { getIntlLocale, translate } from "@/lib/i18n";
 import { PlateSelectionProvider } from "@/lib/plateSelectionContext";
 import { PrintPlateSelector } from "@/components/PrintPlateSelector";
 import { PrintPlateDetails } from "@/components/PrintPlateDetails";
+import { DownloadPrintButton } from "@/components/DownloadPrintButton";
+import { originalArchives } from "@/lib/originalArchives";
 
 export const dynamic = "force-dynamic";
 
@@ -34,17 +36,23 @@ export default async function PrintDetailPage({
   // Merge over defaults so older saved cost inputs (pre-dating new fields) stay valid.
   const costInputs = { ...defaultCostInputs(settings), ...(await getPrintCostInputs(id)) };
   const plate = print.plate;
+  const archiveSource = print.previewSource ? await getPrint(print.previewSource.printId) : print;
+  const hasOriginal = !print.manual && settings.general.retainOriginalArchives && archiveSource !== null &&
+    await originalArchives.exists(archiveSource.id);
 
   return (
     <PlateSelectionProvider plates={print.plates ?? [print.plate]}>
       <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <PrintNameEditor id={print.id} initialName={print.displayName ?? print.fileName} />
           {!print.manual && <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{print.fileName}</p>}
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {t(print.manual ? "manual.createdAt" : "print.uploadedAt")}{" "}
             {new Date(print.createdAt).toLocaleString(getIntlLocale(lang))}
+          </p>
+          <p className="mt-1 break-all font-mono text-xs text-slate-500 dark:text-slate-400">
+            ID: {print.id}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -53,6 +61,10 @@ export default async function PrintDetailPage({
         </div>
       </div>
       <PrintPlateSelector printId={print.id} />
+      {!print.manual && settings.general.retainOriginalArchives && (
+        hasOriginal ? <DownloadPrintButton id={print.id} fileName={archiveSource?.fileName ?? print.fileName} /> :
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t("print.originalUnavailable")}</p>
+      )}
 
       {plate.hasGcode === false && (
         <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">

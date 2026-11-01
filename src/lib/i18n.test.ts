@@ -40,3 +40,14 @@ test("formats localized numbers and provides a complete English template", () =>
   assert.equal(template["nav.prints"], "Prints");
   assert.ok(Object.values(template).every((value) => typeof value === "string"));
 });
+
+test("upload confirmation labels are translated in both built-in languages", () => {
+  assert.equal(translate("de", "upload.submit"), "Datei hochladen");
+  assert.equal(translate("en", "upload.submit"), "Upload file");
+  for (const language of ["de", "en"]) {
+    for (const key of ["upload.customName", "upload.customNamePlaceholder"]) {
+      assert.notEqual(translate(language, key), key);
+    }
+  }
+  assert.equal(createLanguagePackTemplate()["upload.submit"], "Upload file");
+});

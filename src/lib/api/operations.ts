@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { authEnabled, requestIdentity } from "../auth/server";
 import { canUpdateSettings } from "../auth/settings";
-import type { DataStore } from "../db/shared";
+import { isPrintLinkedToOrderError, type DataStore } from "../db/shared";
 import type { AppSettings, InvoiceCostLine, ParsedPlate, ParsedPrint, PrintCostInputs } from "../types";
 import { calculateAllPlatesCost, calculateCost, defaultCostInputs } from "../costCalculator";
 import { manualBreakdown, parseManualCategories, parseManualFilaments } from "../manualPrint";
@@ -19,7 +19,7 @@ import {
 
 export interface ApiDependencies {
   store: Pick<DataStore, "getSettings" | "saveSettings" | "listPrints" | "getPrint" | "insertPrint" |
-    "savePrint" | "updatePrintName" | "deletePrint" | "getPrintCostInputs" | "savePrintCostInputs">;
+    "savePrint" | "updatePrintName" | "deletePrint" | "getPrintCostInputs" | "savePrintCostInputs" | "listOrders">;
   upload(request: Request): Promise<Response>;
   splitPlates(request: Request, id: string): Promise<Response>;
   model(request: Request, id: string): Promise<Response>;
@@ -253,8 +253,18 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
     summary: "Delete a print and cancel its preview", pathSchema: printPath, responses: ok,
     async handler(_request, { id }) {
       await requirePrint(id);
+      if ((await store.listOrders()).some((order) => order.items.some((item) => item.printId === id))) {
+        throw new ApiError(409, "conflict", "Prints linked to an order cannot be deleted.");
+      }
       await dependencies.cancelPreview(id);
-      await store.deletePrint(id);
+      try {
+        await store.deletePrint(id);
+      } catch (error) {
+        if (isPrintLinkedToOrderError(error)) {
+          throw new ApiError(409, "conflict", "Prints linked to an order cannot be deleted.");
+        }
+        throw error;
+      }
       return json({ ok: true });
     },
   });

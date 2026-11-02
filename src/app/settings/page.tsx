@@ -5,6 +5,7 @@ import { SettingsForm, type SettingsTab } from "@/components/SettingsForm";
 import { DatabaseSettingsForm } from "@/components/DatabaseSettingsForm";
 import { FilamentConnectionSettings } from "@/components/FilamentConnectionSettings";
 import { UserManagement } from "@/components/UserManagement";
+import { BackupRestore } from "@/components/BackupRestore";
 import { getFilamentConnectionsView } from "@/lib/filamentConfig";
 import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -41,7 +42,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       )}
       <SettingsForm
         initialSettings={settings}
-        databaseSettings={can("database.manage") ? <DatabaseSettingsForm initialConfig={getDbConfigView()} /> : null}
+        databaseSettings={can("database.manage") ? <>
+          <DatabaseSettingsForm initialConfig={getDbConfigView()} />
+          <BackupRestore />
+        </> : null}
         filamentSettings={can("integrations.manage") ? <FilamentConnectionSettings initialConnections={getFilamentConnectionsView()} /> : null}
         userSettings={manageUsers && user ? <UserManagement initial={getAuthStore().overview()} actorId={user.id} /> : null}
         initialTab={initialTab}

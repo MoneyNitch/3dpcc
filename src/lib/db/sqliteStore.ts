@@ -1,8 +1,8 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
-import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
-import { defaultSettings, migrateSettings, printModelKey, type DataStore } from "./shared";
+import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { defaultSettings, migrateSettings, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 function openDb(): Database.Database {
   const dataDir = path.join(process.cwd(), "data");
@@ -20,6 +20,7 @@ function openDb(): Database.Database {
   }
   const db = new Database(dbFile);
   db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
   db.exec(`
     CREATE TABLE IF NOT EXISTS prints (
       id TEXT PRIMARY KEY,
@@ -35,6 +36,17 @@ function openDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS print_models (
       id TEXT PRIMARY KEY,
       data BLOB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY,
+      updated_at TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS order_items (
+      order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      print_id TEXT NOT NULL REFERENCES prints(id) ON DELETE RESTRICT,
+      quantity INTEGER NOT NULL,
+      PRIMARY KEY (order_id, print_id)
     );
   `);
   return db;
@@ -123,8 +135,13 @@ export function createSqliteStore(): DataStore {
   }
 
   async function deletePrint(id: string): Promise<void> {
-    db.prepare("DELETE FROM prints WHERE id = ?").run(id);
-    db.prepare("DELETE FROM print_models WHERE id = ? OR id LIKE ?").run(id, `${id}:%`);
+    db.transaction(() => {
+      if (db.prepare("SELECT 1 FROM order_items WHERE print_id = ? LIMIT 1").get(id)) {
+        throw new PrintLinkedToOrderError("Drucke, die einem Auftrag zugeordnet sind, können nicht gelöscht werden.");
+      }
+      db.prepare("DELETE FROM prints WHERE id = ?").run(id);
+      db.prepare("DELETE FROM print_models WHERE id = ? OR id LIKE ?").run(id, `${id}:%`);
+    }).immediate();
   }
 
   async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -141,6 +158,56 @@ export function createSqliteStore(): DataStore {
     );
   }
 
+  async function listOrders(): Promise<PrintOrder[]> {
+    return (db.prepare("SELECT data FROM orders ORDER BY updated_at DESC").all() as { data: string }[])
+      .map((row) => JSON.parse(row.data) as PrintOrder);
+  }
+
+  async function saveOrder(order: PrintOrder): Promise<void> {
+    db.transaction(() => {
+      db.prepare(
+        "INSERT INTO orders (id, updated_at, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data = excluded.data"
+      ).run(order.id, order.updatedAt, JSON.stringify(order));
+      db.prepare("DELETE FROM order_items WHERE order_id = ?").run(order.id);
+      const itemStatement = db.prepare("INSERT INTO order_items (order_id, print_id, quantity) VALUES (?, ?, ?)");
+      for (const item of order.items) itemStatement.run(order.id, item.printId, item.quantity);
+    }).immediate();
+  }
+
+  async function deleteOrder(id: string): Promise<void> {
+    db.prepare("DELETE FROM orders WHERE id = ?").run(id);
+  }
+
+  async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
+    const replace = db.transaction(() => {
+      db.exec("DELETE FROM order_items; DELETE FROM print_models; DELETE FROM prints; DELETE FROM orders; DELETE FROM settings;");
+      db.prepare("INSERT INTO settings (id, data) VALUES (1, ?)").run(JSON.stringify(data.settings));
+      const printStatement = db.prepare(
+        "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES (?, ?, ?, ?, ?)"
+      );
+      const modelStatement = db.prepare("INSERT INTO print_models (id, data) VALUES (?, ?)");
+      for (const entry of data.prints) {
+        printStatement.run(
+          entry.print.id,
+          entry.print.fileName,
+          entry.print.createdAt,
+          JSON.stringify(entry.print),
+          entry.costInputs ? JSON.stringify(entry.costInputs) : null,
+        );
+        for (const model of entry.models) {
+          modelStatement.run(printModelKey(entry.print.id, model.plateIndex ?? undefined), model.model);
+        }
+      }
+      const orderStatement = db.prepare("INSERT INTO orders (id, updated_at, data) VALUES (?, ?, ?)");
+      const orderItemStatement = db.prepare("INSERT INTO order_items (order_id, print_id, quantity) VALUES (?, ?, ?)");
+      for (const order of data.orders) {
+        orderStatement.run(order.id, order.updatedAt, JSON.stringify(order));
+        for (const item of order.items) orderItemStatement.run(order.id, item.printId, item.quantity);
+      }
+    });
+    replace.immediate();
+  }
+
   return {
     getSettings,
     saveSettings,
@@ -155,5 +222,9 @@ export function createSqliteStore(): DataStore {
     deletePrint,
     getPrintCostInputs,
     savePrintCostInputs,
+    listOrders,
+    saveOrder,
+    deleteOrder,
+    replaceApplicationData,
   };
 }

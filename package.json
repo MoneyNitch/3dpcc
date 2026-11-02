@@ -21,7 +21,8 @@
     "start:production:background": "npm run build && npm run start:background",
     "lint": "eslint",
     "test:api": "tsx --test src/lib/api/*.test.ts",
-    "test:auth": "tsx --test src/lib/auth/*.test.ts"
+    "test:auth": "tsx --test src/lib/auth/*.test.ts",
+    "test:backup": "tsx --test src/lib/backup.test.ts"
   },
   "dependencies": {
     "adm-zip": "^0.6.0",

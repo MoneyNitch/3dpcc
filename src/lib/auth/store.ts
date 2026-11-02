@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import { mkdirSync } from "node:fs";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -295,16 +296,81 @@ export function createAuthStore(file: string) {
   return { initialize, login, session, identity, newSession, changeCredentials, saveUser, deleteUser,
     saveRole, deleteRole, apiIdentity, createApiKey, regenerateApiKey, revokeApiKey, overview, passwordPolicy, savePasswordPolicy,
     logout: (token: string) => { db.prepare("DELETE FROM auth_sessions WHERE hash = ?").run(digest(token)); },
+    backup: (destination: string) => db.backup(destination),
+    clearSessions: () => db.exec("DELETE FROM auth_sessions; DELETE FROM auth_attempts"),
     close: () => db.close(),
   };
 }
 
 const globalAuth = globalThis as typeof globalThis & { __pccAuthStore?: ReturnType<typeof createAuthStore> };
+const authDatabasePath = path.join(process.cwd(), "data", "auth.db");
+
 export function getAuthStore() {
   if (!globalAuth.__pccAuthStore) {
-    const directory = path.join(process.cwd(), "data");
-    mkdirSync(directory, { recursive: true });
-    globalAuth.__pccAuthStore = createAuthStore(path.join(directory, "auth.db"));
+    mkdirSync(path.dirname(authDatabasePath), { recursive: true });
+    globalAuth.__pccAuthStore = createAuthStore(authDatabasePath);
   }
   return globalAuth.__pccAuthStore;
+}
+
+export async function exportAuthDatabase(): Promise<Buffer> {
+  const file = `${authDatabasePath}.${randomUUID()}.backup`;
+  try {
+    const store = getAuthStore();
+    await store.initialize();
+    await store.backup(file);
+    return await readFile(file);
+  } finally {
+    await rm(file, { force: true });
+  }
+}
+
+export async function verifyAuthDatabase(data: Buffer): Promise<void> {
+  const file = `${authDatabasePath}.${randomUUID()}.verify`;
+  await writeFile(file, data, { mode: 0o600 });
+  try {
+    const database = new Database(file, { readonly: true, fileMustExist: true });
+    try {
+      const integrity = database.pragma("integrity_check") as { integrity_check: string }[];
+      if (integrity.length !== 1 || integrity[0].integrity_check !== "ok") {
+        throw new Error("Backup authentication database is corrupt.");
+      }
+      const tables = new Set((database.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+      ).all() as { name: string }[]).map((table) => table.name));
+      for (const table of ["auth_users", "auth_roles", "auth_sessions", "auth_api_keys", "auth_meta"]) {
+        if (!tables.has(table)) throw new Error("Backup authentication database is incomplete.");
+      }
+      if (!database.prepare("SELECT id FROM auth_meta WHERE id = 1").get()) {
+        throw new Error("Backup authentication database is not initialized.");
+      }
+    } finally {
+      database.close();
+    }
+  } finally {
+    await rm(file, { force: true });
+  }
+}
+
+export async function restoreAuthDatabase(data: Buffer): Promise<void> {
+  const tempFile = `${authDatabasePath}.${randomUUID()}.restore`;
+  await writeFile(tempFile, data, { mode: 0o600 });
+  const prepared = createAuthStore(tempFile);
+  try {
+    await prepared.initialize();
+    prepared.clearSessions();
+  } finally {
+    await prepared.close();
+  }
+  await rm(`${tempFile}-shm`, { force: true });
+  await rm(`${tempFile}-wal`, { force: true });
+  const current = globalAuth.__pccAuthStore;
+  if (current) await current.close();
+  await rm(`${authDatabasePath}-shm`, { force: true });
+  await rm(`${authDatabasePath}-wal`, { force: true });
+  await rm(authDatabasePath, { force: true });
+  await rename(tempFile, authDatabasePath);
+  const restored = createAuthStore(authDatabasePath);
+  await restored.initialize();
+  globalAuth.__pccAuthStore = restored;
 }

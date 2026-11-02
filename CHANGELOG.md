@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Order management for customer orders with status, due date, notes, linked
+  saved prints and per-print quantities. Prints linked to an order cannot be
+  deleted until they are unlinked.
+- Password-protected full application backups and restore under Settings →
+  Database, including settings, print data, users, external filament settings,
+  retained originals and preview queue files. Database connection settings are
+  preserved on the current installation during restore.
 - API key regeneration in User management, replacing a lost key immediately
   while retaining its name and user and displaying the replacement only once.
 - Configurable password requirements in User management: minimum length from

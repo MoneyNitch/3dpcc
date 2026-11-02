@@ -6,7 +6,9 @@ import {
   savePrintCostInputs,
   savePrint,
   updatePrintName,
+  listOrders,
 } from "@/lib/db";
+import { isPrintLinkedToOrderError } from "@/lib/db/shared";
 import { readPrintImage } from "@/lib/printImage";
 import { manualBreakdown, parseManualCategories, parseManualFilaments } from "@/lib/manualPrint";
 import { getPreviewQueue } from "@/lib/previewQueue";
@@ -36,8 +38,18 @@ export async function DELETE(
   const denied = await authorize(_req, "prints.write");
   if (denied) return denied;
   const { id } = await params;
+  if ((await listOrders()).some((order) => order.items.some((item) => item.printId === id))) {
+    return NextResponse.json({ error: "Drucke, die einem Auftrag zugeordnet sind, können nicht gelöscht werden." }, { status: 409 });
+  }
   await (await getPreviewQueue()).cancel(id);
-  await deletePrint(id);
+  try {
+    await deletePrint(id);
+  } catch (error) {
+    if (isPrintLinkedToOrderError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
   return NextResponse.json({ ok: true });
 }
 

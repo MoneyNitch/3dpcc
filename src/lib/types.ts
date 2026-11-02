@@ -84,6 +84,19 @@ export interface ParsedPrint {
   previewSource?: { printId: string; plateIndex: number };
 }
 
+export type OrderStatus = "open" | "in_progress" | "ready" | "completed" | "cancelled";
+
+export interface PrintOrder {
+  id: string;
+  customerName: string;
+  status: OrderStatus;
+  dueDate: string | null;
+  notes: string;
+  items: { printId: string; quantity: number }[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Material {
   id: string;
   name: string;

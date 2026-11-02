@@ -24,6 +24,7 @@ export async function Header() {
           {can("prints.read") && <Link href="/">{t("nav.prints")}</Link>}
           {can("documents.read") && <Link href="/invoices">{t("nav.invoices")}</Link>}
           {can("documents.read") && <Link href="/quotes">{t("nav.quotes")}</Link>}
+          {can("documents.read") && <Link href="/orders">{t("nav.orders")}</Link>}
           {can("settings.read") && <Link href="/settings">{t("nav.settings")}</Link>}
           {(enabled ? can("api.use") : process.env.API_KEYS?.trim()) && (
             <Link href="/api/v1/docs" prefetch={false} target="_blank" rel="noopener noreferrer">

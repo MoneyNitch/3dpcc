@@ -20,6 +20,9 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     import { PATCH as rename } from ${JSON.stringify(new URL("../../app/api/prints/[id]/plates/route.ts", import.meta.url).href)};
     import { originalArchives } from ${JSON.stringify(new URL("../originalArchives.ts", import.meta.url).href)};
     import { deletePrint } from ${JSON.stringify(new URL("../db/index.ts", import.meta.url).href)};
+    import { POST as createOrder } from ${JSON.stringify(new URL("../../app/api/orders/route.ts", import.meta.url).href)};
+    import { PUT as updateOrder, DELETE as deleteOrder } from ${JSON.stringify(new URL("../../app/api/orders/[id]/route.ts", import.meta.url).href)};
+    import { DELETE as deletePrintRoute } from ${JSON.stringify(new URL("../../app/api/prints/[id]/route.ts", import.meta.url).href)};
     import AdmZip from ${JSON.stringify(pathToFileURL(requireModule.resolve("adm-zip")).href)};
     const store = createSqliteStore();
     const unexpected = async () => { throw new Error("Unexpected preview operation"); };
@@ -52,6 +55,32 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     assert.equal(renameResponse.status, 200);
     assert.equal((await reopened.getPrint(print.id)).plate.plateName, "Named plate");
     assert.equal((await reopened.getSettings()).general.companyName, "API test");
+    const orderBody = {
+      customerName: "Persistent customer", status: "open", dueDate: "2026-12-01",
+      notes: "Test order", items: [{ printId: print.id, quantity: 2 }],
+    };
+    const createdOrder = await createOrder(new Request("http://localhost/api/orders", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(orderBody),
+    }));
+    assert.equal(createdOrder.status, 201);
+    const { order } = await createdOrder.json();
+    assert.equal((await reopened.listOrders())[0].customerName, "Persistent customer");
+    await assert.rejects(reopened.deletePrint(print.id), /einem Auftrag zugeordnet/);
+    assert.ok(await reopened.getPrint(print.id));
+    const linkedDelete = await deletePrintRoute(new Request("http://localhost", { method: "DELETE" }), {
+      params: Promise.resolve({ id: print.id }),
+    });
+    assert.equal(linkedDelete.status, 409);
+    const updatedOrder = await updateOrder(new Request("http://localhost/api/orders/" + order.id, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...orderBody, status: "in_progress" }),
+    }), { params: Promise.resolve({ id: order.id }) });
+    assert.equal(updatedOrder.status, 200);
+    assert.equal((await reopened.listOrders())[0].status, "in_progress");
+    assert.equal((await deleteOrder(new Request("http://localhost", { method: "DELETE" }), {
+      params: Promise.resolve({ id: order.id }),
+    })).status, 200);
+    assert.equal((await reopened.listOrders()).length, 0);
     assert.equal((await send("/prints/" + print.id, "DELETE")).status, 200);
     assert.equal(await reopened.getPrint(print.id), null);
     const zip = new AdmZip();

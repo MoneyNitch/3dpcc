@@ -47,6 +47,9 @@ tower and total) and multi-color information, and calculates print costs.
 - Invoice and quote export dialogs offer a preview with the current print,
   costs and customer details before downloading or printing. Previewing does
   not advance the document numbering counter; return to details to edit it.
+- Order management at **Orders** stores a customer, status, due date, notes,
+  and saved prints with quantities. Prints linked to an order cannot be deleted
+  until the order is changed or removed.
 - Read-only Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
 - Interactive 3D preview: embedded model meshes when available, otherwise a
@@ -76,6 +79,22 @@ temporary 3D queue, even when PostgreSQL/MySQL is used or 3D previews are disabl
 Allow sufficient disk space, preserve write permissions, and back up this
 directory with the database. Backend transfers on the same instance retain this
 local directory; moving to another host requires copying it as well.
+
+### Backup and restore
+
+Superadmins and custom roles with database-management permission can create and
+restore backups under **Settings → Database**. Each `.3dpcc` backup is encrypted
+with AES-256-GCM using a passphrase-derived key; choose a strong passphrase and
+store it separately because it cannot be recovered.
+
+The archive includes application settings, prints and cost inputs, saved 3D
+models, orders, users, password/API-key hashes and roles, Spoolman/FilaMan
+connection settings, retained original uploads, and local preview-queue files.
+Backups and restores are limited to 512 MB. Restore validates the archive, then
+replaces those application records and local files; the database connection
+configuration and environment variables of the current installation are not
+changed. Restoring replaces the user database too, so active sessions are invalidated and you must
+sign in again with an account from the backup.
 
 ### Background 3D calculation on slower systems
 

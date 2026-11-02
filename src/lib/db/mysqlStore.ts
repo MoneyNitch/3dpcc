@@ -1,6 +1,6 @@
 import mysql from "mysql2/promise";
-import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
-import { defaultSettings, migrateSettings, printModelKey, type DataStore } from "./shared";
+import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { defaultSettings, migrateSettings, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 async function ensureSchema(pool: mysql.Pool): Promise<void> {
   await pool.query(`
@@ -22,6 +22,23 @@ async function ensureSchema(pool: mysql.Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS print_models (
       id VARCHAR(64) PRIMARY KEY,
       data LONGBLOB NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id VARCHAR(64) PRIMARY KEY,
+      updated_at VARCHAR(64) NOT NULL,
+      data LONGTEXT NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      order_id VARCHAR(64) NOT NULL,
+      print_id VARCHAR(64) NOT NULL,
+      quantity INT NOT NULL,
+      PRIMARY KEY (order_id, print_id),
+      CONSTRAINT order_items_order_fk FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+      CONSTRAINT order_items_print_fk FOREIGN KEY (print_id) REFERENCES prints(id) ON DELETE RESTRICT
     )
   `);
 }
@@ -119,7 +136,14 @@ export function createMysqlStore(connectionString?: string): DataStore {
 
   async function deletePrint(id: string): Promise<void> {
     await ready;
-    await pool.query("DELETE FROM prints WHERE id = ?", [id]);
+    try {
+      await pool.query("DELETE FROM prints WHERE id = ?", [id]);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ER_ROW_IS_REFERENCED_2") {
+        throw new PrintLinkedToOrderError("Drucke, die einem Auftrag zugeordnet sind, können nicht gelöscht werden.");
+      }
+      throw error;
+    }
     await pool.query("DELETE FROM print_models WHERE id = ? OR id LIKE ?", [id, `${id}:%`]);
   }
 
@@ -151,6 +175,83 @@ export function createMysqlStore(connectionString?: string): DataStore {
     ]);
   }
 
+  async function listOrders(): Promise<PrintOrder[]> {
+    await ready;
+    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT data FROM orders ORDER BY updated_at DESC");
+    return rows.map((row) => JSON.parse(row.data) as PrintOrder);
+  }
+
+  async function saveOrder(order: PrintOrder): Promise<void> {
+    await ready;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.query(
+        "INSERT INTO orders (id, updated_at, data) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at), data = VALUES(data)",
+        [order.id, order.updatedAt, JSON.stringify(order)]
+      );
+      await connection.query("DELETE FROM order_items WHERE order_id = ?", [order.id]);
+      for (const item of order.items) {
+        await connection.query("INSERT INTO order_items (order_id, print_id, quantity) VALUES (?, ?, ?)", [
+          order.id, item.printId, item.quantity,
+        ]);
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async function deleteOrder(id: string): Promise<void> {
+    await ready;
+    await pool.query("DELETE FROM orders WHERE id = ?", [id]);
+  }
+
+  async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
+    await ready;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.query("DELETE FROM print_models");
+      await connection.query("DELETE FROM order_items");
+      await connection.query("DELETE FROM prints");
+      await connection.query("DELETE FROM orders");
+      await connection.query("DELETE FROM settings");
+      await connection.query("INSERT INTO settings (id, data) VALUES (1, ?)", [JSON.stringify(data.settings)]);
+      for (const entry of data.prints) {
+        await connection.query(
+          "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES (?, ?, ?, ?, ?)",
+          [entry.print.id, entry.print.fileName, entry.print.createdAt, JSON.stringify(entry.print),
+            entry.costInputs ? JSON.stringify(entry.costInputs) : null]
+        );
+        for (const model of entry.models) {
+          await connection.query("INSERT INTO print_models (id, data) VALUES (?, ?)", [
+            printModelKey(entry.print.id, model.plateIndex ?? undefined), model.model,
+          ]);
+        }
+      }
+      for (const order of data.orders) {
+        await connection.query("INSERT INTO orders (id, updated_at, data) VALUES (?, ?, ?)", [
+          order.id, order.updatedAt, JSON.stringify(order),
+        ]);
+        for (const item of order.items) {
+          await connection.query("INSERT INTO order_items (order_id, print_id, quantity) VALUES (?, ?, ?)", [
+            order.id, item.printId, item.quantity,
+          ]);
+        }
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
   return {
     getSettings,
     saveSettings,
@@ -165,5 +266,9 @@ export function createMysqlStore(connectionString?: string): DataStore {
     deletePrint,
     getPrintCostInputs,
     savePrintCostInputs,
+    listOrders,
+    saveOrder,
+    deleteOrder,
+    replaceApplicationData,
   };
 }

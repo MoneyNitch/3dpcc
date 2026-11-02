@@ -27,6 +27,8 @@ const actionSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("deleteRole"), id: z.string().min(1).max(64) }),
   z.strictObject({ action: z.literal("createKey"), userId: z.uuid(), name: z.string().trim().min(1).max(64) }),
   z.strictObject({ action: z.literal("revokeKey"), id: z.uuid() }),
+  z.strictObject({ action: z.literal("regenerateKey"), id: z.uuid() }),
+  z.strictObject({ action: z.literal("savePasswordPolicy"), data: z.unknown() }),
 ]);
 export async function POST(request: Request) {
   try {
@@ -42,6 +44,8 @@ export async function POST(request: Request) {
       case "deleteRole": store.deleteRole(user.id, input.id); break;
       case "createKey": token = store.createApiKey(user.id, input.userId, input.name); break;
       case "revokeKey": store.revokeApiKey(user.id, input.id); break;
+      case "regenerateKey": token = store.regenerateApiKey(user.id, input.id); break;
+      case "savePasswordPolicy": store.savePasswordPolicy(user.id, input.data); break;
     }
     return Response.json({ ok: true, token }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return authErrorResponse(error); }

@@ -5,10 +5,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { builtInRoles, permissions, withRequiredReadPermissions, type AuthUser, type Identity, type Role } from "./permissions";
+import { defaultPasswordPolicy, passwordPolicyError, passwordPolicySchema } from "./passwordPolicy";
 
 const deriveKey = promisify(scrypt);
 export const usernameSchema = z.string().trim().min(3).max(64).regex(/^[a-zA-Z0-9_.-]+$/).transform((value) => value.toLowerCase());
-export const passwordSchema = z.string().min(12).max(128).refine((value) => value !== "admin");
+export const passwordSchema = z.string().min(1).max(128);
 export const userSchema = z.strictObject({
   username: usernameSchema, roleId: z.string().min(1).max(64), active: z.boolean(),
   password: passwordSchema.optional(),
@@ -71,6 +72,7 @@ export function createAuthStore(file: string) {
     );
     CREATE TABLE IF NOT EXISTS auth_attempts (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS auth_meta (id INTEGER PRIMARY KEY CHECK(id = 1));
+    CREATE TABLE IF NOT EXISTS auth_password_policy (id INTEGER PRIMARY KEY CHECK(id = 1), value TEXT NOT NULL);
   `);
   let ready: Promise<void> | undefined;
   function initialize() {
@@ -107,6 +109,20 @@ export function createAuthStore(file: string) {
     const role = roles().find((role) => role.id === row.role_id);
     if (!role) throw new Error("Stored authentication role is missing.");
     return { ...publicUser(row), permissions: role.permissions };
+  }
+  function passwordPolicy() {
+    const row = db.prepare("SELECT value FROM auth_password_policy WHERE id = 1").get() as { value: string } | undefined;
+    return row ? passwordPolicySchema.parse(JSON.parse(row.value)) : { ...defaultPasswordPolicy };
+  }
+  function savePasswordPolicy(actor: string, raw: unknown) {
+    const policy = passwordPolicySchema.parse(raw);
+    if (!identity(actor)?.permissions.includes("users.manage")) throw new AuthError(403, "forbidden");
+    db.prepare("INSERT INTO auth_password_policy VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value")
+      .run(JSON.stringify(policy));
+  }
+  function validatePassword(password: string) {
+    const error = passwordPolicyError(password, passwordPolicy());
+    if (error) throw new AuthError(400, error);
   }
   function invalidate(id: string) {
     db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(id);
@@ -158,6 +174,7 @@ export function createAuthStore(file: string) {
   async function changeCredentials(id: string, username: string, oldPassword: string, password: string) {
     username = usernameSchema.parse(username);
     passwordSchema.parse(password);
+    validatePassword(password);
     const row = userRow(id);
     throttle(`credentials:${id}`, Date.now());
     if (!row || !await verifyPassword(oldPassword, row.password_hash)) throw new AuthError(401, "invalidLogin");
@@ -167,6 +184,7 @@ export function createAuthStore(file: string) {
     db.transaction(() => {
       const current = userRow(id);
       if (!current?.active || current.password_hash !== row.password_hash) throw new AuthError(409, "accountChanged");
+      validatePassword(password);
       const existing = db.prepare("SELECT id FROM auth_users WHERE username = ? AND id <> ?").get(username, id);
       if (existing) throw new AuthError(409, "usernameTaken");
       db.prepare("UPDATE auth_users SET username = ?, password_hash = ?, must_change_password = 0, must_change_username = 0 WHERE id = ?").run(username, hash, id);
@@ -177,9 +195,11 @@ export function createAuthStore(file: string) {
   async function saveUser(actor: string, id: string | undefined, raw: unknown) {
     const input = userSchema.parse(raw);
     if (!id && !input.password) throw new AuthError(400, "passwordRequired");
+    if (input.password) validatePassword(input.password);
     const hash = input.password ? await hashPassword(input.password) : undefined;
     db.transaction(() => {
       if (!identity(actor)?.permissions.includes("users.manage")) throw new AuthError(403, "forbidden");
+      if (input.password) validatePassword(input.password);
       requireRole(input.roleId);
       if (id && !userRow(id)) throw new AuthError(404, "userMissing");
       if (actor === id && (!input.active || input.roleId !== "superadmin" || hash)) throw new AuthError(409, "ownAccount");
@@ -230,15 +250,30 @@ export function createAuthStore(file: string) {
     const user = row ? identity(row.user_id) : null;
     return user && !user.mustChangePassword && !user.mustChangeUsername && user.permissions.includes("api.use") ? user : null;
   }
+  function requireApiUser(userId: string) {
+    const user = identity(userId);
+    if (!user || user.mustChangePassword || user.mustChangeUsername || !user.permissions.includes("api.use")) throw new AuthError(409, "apiUserNotReady");
+  }
   function createApiKey(actor: string, userId: string, name: string): string {
     return db.transaction(() => {
       if (!identity(actor)?.permissions.includes("users.manage")) throw new AuthError(403, "forbidden");
-      const user = identity(userId);
-      if (!user || user.mustChangePassword || user.mustChangeUsername || !user.permissions.includes("api.use")) throw new AuthError(409, "apiUserNotReady");
+      requireApiUser(userId);
       const count = db.prepare("SELECT COUNT(*) AS count FROM auth_api_keys WHERE user_id = ?").get(userId) as { count: number };
       if (count.count >= 10) throw new AuthError(409, "keyLimit");
       const token = `pcc_${randomBytes(32).toString("base64url")}`;
       db.prepare("INSERT INTO auth_api_keys VALUES (?, ?, ?, ?, ?)").run(randomUUID(), digest(token), userId, name, Date.now());
+      return token;
+    }).immediate();
+  }
+  function regenerateApiKey(actor: string, id: string): string {
+    return db.transaction(() => {
+      if (!identity(actor)?.permissions.includes("users.manage")) throw new AuthError(403, "forbidden");
+      const key = db.prepare("SELECT user_id FROM auth_api_keys WHERE id = ?").get(id) as { user_id: string } | undefined;
+      if (!key) throw new AuthError(404, "keyMissing");
+      requireApiUser(key.user_id);
+      const token = `pcc_${randomBytes(32).toString("base64url")}`;
+      db.prepare("UPDATE auth_api_keys SET hash = ?, created_at = ? WHERE id = ?").run(digest(token), Date.now(), id);
+      db.prepare("DELETE FROM auth_sessions WHERE user_id = ? AND scope = 'docs'").run(key.user_id);
       return token;
     }).immediate();
   }
@@ -255,10 +290,10 @@ export function createAuthStore(file: string) {
     const users = (db.prepare("SELECT * FROM auth_users ORDER BY username").all() as UserRow[]).map(publicUser);
     const keys = (db.prepare("SELECT id, user_id, name, created_at FROM auth_api_keys ORDER BY created_at DESC").all() as TokenRow[])
       .map((row): ApiKeyView => ({ id: row.id, userId: row.user_id, name: row.name, createdAt: row.created_at }));
-    return { users, roles: roles(), keys };
+    return { users, roles: roles(), keys, passwordPolicy: passwordPolicy() };
   }
   return { initialize, login, session, identity, newSession, changeCredentials, saveUser, deleteUser,
-    saveRole, deleteRole, apiIdentity, createApiKey, revokeApiKey, overview,
+    saveRole, deleteRole, apiIdentity, createApiKey, regenerateApiKey, revokeApiKey, overview, passwordPolicy, savePasswordPolicy,
     logout: (token: string) => { db.prepare("DELETE FROM auth_sessions WHERE hash = ?").run(digest(token)); },
     close: () => db.close(),
   };

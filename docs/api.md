@@ -16,6 +16,13 @@ Benutzer mit `API verwenden`-Recht erstellt werden, nachdem diese ihr
 vorgegebenes Passwort geändert haben. Sie werden nur einmal angezeigt;
 gespeichert wird ausschließlich ihr SHA-256-Hash.
 
+Bei einem vergessenen Schlüssel kann ein Superadmin **Neu generieren** wählen.
+Nach Bestätigung wird der alte Schlüssel sofort ungültig und der neue einmalig
+angezeigt. Bezeichnung und Benutzer bleiben erhalten; verbundene Anwendungen
+müssen auf den neuen Schlüssel umgestellt werden. Dies funktioniert auch beim
+Limit von 10 Schlüsseln. Dokumentations-Sitzungen dieses Benutzers werden
+beendet; normale Browser-Sitzungen und andere API-Schlüssel bleiben gültig.
+
 Jeder Aufruf prüft die aktuelle Rolle: Viewer dürfen lesen und
 `POST /prints/{id}/calculate` verwenden, aber keine Drucke oder Einstellungen
 ändern. Dokumenterzeugung benötigt Dokument-Schreibrechte und Druck-Leserechte.

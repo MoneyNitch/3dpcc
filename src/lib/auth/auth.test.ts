@@ -8,6 +8,7 @@ import { apiPermission, hasPermission } from "./permissions";
 import { canUpdateSettings } from "./settings";
 import { defaultSettings } from "../db/shared";
 import { authEnabled, authErrorResponse, checkOrigin, setSessionCookie } from "./server";
+import { defaultPasswordPolicy, passwordCharacterRules } from "./passwordPolicy";
 
 const password = "a-long-test-password";
 async function fixture() {
@@ -21,6 +22,71 @@ async function fixture() {
 function errorCode(code: string) {
   return (error: unknown) => error instanceof AuthError && error.code === code;
 }
+
+test("password policy is persistent, superadmin-only and preserves existing logins and tokens", async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "pcc-auth-policy-"));
+  const file = path.join(directory, "auth.db");
+  const store = createAuthStore(file);
+  try {
+    await store.initialize();
+    assert.deepEqual(store.passwordPolicy(), defaultPasswordPolicy);
+    const initial = await store.login("admin", "admin");
+    const token = await store.changeCredentials(initial.user.id, "owner", "admin", password);
+    const owner = store.session(token)!;
+    const key = store.createApiKey(owner.id, owner.id, "existing");
+    await store.saveUser(owner.id, undefined, { username: "reader", roleId: "viewer", active: true, password });
+    const reader = store.overview().users.find((user) => user.username === "reader")!;
+    const relaxed = { ...defaultPasswordPolicy, minLength: 4 };
+    assert.throws(() => store.savePasswordPolicy(reader.id, relaxed), errorCode("forbidden"));
+    assert.throws(() => store.savePasswordPolicy("missing", relaxed), errorCode("forbidden"));
+    assert.throws(() => store.savePasswordPolicy(owner.id, { ...relaxed, minLength: 3 }));
+    assert.deepEqual(store.passwordPolicy(), defaultPasswordPolicy);
+    store.savePasswordPolicy(owner.id, relaxed);
+    assert.deepEqual(store.overview().passwordPolicy, relaxed);
+    await store.saveUser(owner.id, undefined, { username: "short", roleId: "viewer", active: true, password: "1234" });
+    const short = store.overview().users.find((user) => user.username === "short")!;
+    const shortToken = await store.changeCredentials(short.id, "short", "1234", "abcd");
+    const strict = { ...relaxed };
+    for (const rule of passwordCharacterRules) strict[rule.key] = true;
+    store.savePasswordPolicy(owner.id, strict);
+    assert.equal(store.session(token)?.id, owner.id);
+    assert.equal(store.session(shortToken)?.id, short.id);
+    assert.equal(store.apiIdentity(key)?.id, owner.id);
+    assert.equal((await store.login("owner", password)).user.mustChangePassword, false);
+    assert.equal((await store.login("short", "abcd")).user.mustChangePassword, false);
+    await assert.rejects(store.saveUser(owner.id, undefined, { username: "invalid", roleId: "viewer", active: true, password: "abcd" }), errorCode("passwordUppercase"));
+    await assert.rejects(store.saveUser(owner.id, short.id, { username: "short", roleId: "viewer", active: true, password: "Abcd" }), errorCode("passwordNumber"));
+    await assert.rejects(store.changeCredentials(short.id, "short", "abcd", "Abc1"), errorCode("passwordSpecial"));
+    await store.saveUser(owner.id, short.id, { username: "short", roleId: "viewer", active: true });
+    assert.equal((await store.login("short", "abcd")).user.mustChangePassword, false);
+    await store.saveUser(owner.id, short.id, { username: "short", roleId: "viewer", active: true, password: "Aa1!" });
+    assert.equal(store.session(shortToken), null);
+    const changed = await store.changeCredentials(short.id, "short", "Aa1!", "Bb2?");
+    assert.equal(store.session(changed)?.mustChangePassword, false);
+    const reopened = createAuthStore(file);
+    try { assert.deepEqual(reopened.passwordPolicy(), strict); }
+    finally { reopened.close(); }
+  } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("password changes recheck rules when the policy changes during hashing", async () => {
+  const { store, owner, token } = await fixture();
+  try {
+    const relaxed = { ...defaultPasswordPolicy, minLength: 4 };
+    const strict = { ...relaxed, requireUppercase: true };
+    store.savePasswordPolicy(owner.id, relaxed);
+    const creating = store.saveUser(owner.id, undefined, { username: "racing", roleId: "viewer", active: true, password: "abcd" });
+    store.savePasswordPolicy(owner.id, strict);
+    await assert.rejects(creating, errorCode("passwordUppercase"));
+    assert.equal(store.overview().users.some((user) => user.username === "racing"), false);
+    store.savePasswordPolicy(owner.id, relaxed);
+    const changing = store.changeCredentials(owner.id, "owner", password, "abcd");
+    store.savePasswordPolicy(owner.id, strict);
+    await assert.rejects(changing, errorCode("passwordUppercase"));
+    assert.equal(store.session(token)?.id, owner.id);
+    assert.equal((await store.login("owner", password)).user.id, owner.id);
+  } finally { store.close(); }
+});
 
 test("auth errors are recognised even when the class is duplicated by bundling", async () => {
   const brand = Symbol.for("3d-pcc.auth-error");
@@ -136,6 +202,45 @@ test("API keys are scoped to active users, docs sessions cannot log into the app
     assert.equal(store.apiIdentity(readerKey), null);
     assert.equal(store.session(readerToken), null);
     await assert.rejects(store.login("reader", password + "-reader"), errorCode("invalidLogin"));
+  } finally { store.close(); }
+});
+
+test("API key regeneration replaces only the selected key, even at the key limit", async () => {
+  const { store, owner, token } = await fixture();
+  try {
+    const oldKey = store.createApiKey(owner.id, owner.id, "lost integration");
+    const selected = store.overview().keys.find((key) => key.name === "lost integration")!;
+    const otherKeys = Array.from({ length: 9 }, (_, index) => store.createApiKey(owner.id, owner.id, `other-${index}`));
+    assert.throws(() => store.createApiKey(owner.id, owner.id, "over limit"), errorCode("keyLimit"));
+    await store.saveUser(owner.id, undefined, { username: "reader", roleId: "viewer", active: true, password });
+    const reader = store.overview().users.find((user) => user.username === "reader")!;
+    const readerDocs = store.newSession(reader.id, "docs");
+    const docs = store.newSession(owner.id, "docs");
+    assert.throws(() => store.regenerateApiKey(reader.id, selected.id), errorCode("forbidden"));
+    assert.throws(() => store.regenerateApiKey("missing", selected.id), errorCode("forbidden"));
+    assert.throws(() => store.regenerateApiKey(owner.id, "missing"), errorCode("keyMissing"));
+    assert.equal(store.apiIdentity(oldKey)?.id, owner.id);
+    const regenerated = store.regenerateApiKey(owner.id, selected.id);
+    assert.notEqual(regenerated, oldKey);
+    assert.match(regenerated, /^pcc_[A-Za-z0-9_-]{43}$/);
+    assert.equal(store.apiIdentity(oldKey), null);
+    assert.equal(store.apiIdentity(regenerated)?.id, owner.id);
+    assert.equal(store.session(docs, Date.now(), "docs"), null);
+    assert.equal(store.session(readerDocs, Date.now(), "docs")?.id, reader.id);
+    assert.equal(store.session(token)?.id, owner.id);
+    for (const key of otherKeys) assert.equal(store.apiIdentity(key)?.id, owner.id);
+    const overview = store.overview();
+    assert.equal(overview.keys.length, 10);
+    const replacement = overview.keys.find((key) => key.id === selected.id)!;
+    assert.equal(replacement.name, selected.name);
+    assert.equal(replacement.userId, selected.userId);
+    assert.ok(replacement.createdAt >= selected.createdAt);
+    assert.ok(!JSON.stringify(overview).includes(regenerated));
+    const again = store.regenerateApiKey(owner.id, selected.id);
+    assert.equal(store.apiIdentity(regenerated), null);
+    assert.equal(store.apiIdentity(again)?.id, owner.id);
+    store.revokeApiKey(owner.id, selected.id);
+    assert.throws(() => store.regenerateApiKey(owner.id, selected.id), errorCode("keyMissing"));
   } finally { store.close(); }
 });
 

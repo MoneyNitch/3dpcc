@@ -252,7 +252,7 @@ invoice data and are intentionally excluded from the repository by
 Login is **enabled by default**. On the first login use **admin / admin**.
 This initial account is a **superadmin** and must change **both its username
 and password before accessing the application**, including setup and APIs.
-New passwords must have 12–128 characters; usernames have 3–64 characters
+New passwords default to 12–128 characters; usernames have 3–64 characters
 (`A–Z`, `a–z`, `0–9`, `.`, `_`, `-`) and are stored lowercase.
 Secure this known initial account immediately, before exposing the server to
 other users. There is no public registration.
@@ -262,6 +262,17 @@ disable or delete accounts, reset passwords, define named custom roles and
 issue/revoke user-bound API keys. New/reset passwords must be changed at the
 next login. Click your username in the navigation to open the user menu with
 **Change password** and **Sign out**.
+
+Under **Password requirements**, superadmins can set the minimum length
+(4–128 characters) and independently require uppercase letters, lowercase
+letters, digits and special characters (whitespace does not count as a
+special character). Save these rules before creating or resetting passwords.
+They are enforced server-side for new, reset and changed passwords; existing
+passwords, sessions and API keys remain valid when the rules change. The known
+initial password `admin` remains disallowed as a new password. Short passwords
+are easier to guess; at least 12 characters are recommended, especially for
+network-accessible deployments. The rules are stored in the local authentication
+database, independently of normal application settings and the print database.
 
 | Role | Permissions |
 |---|---|
@@ -289,7 +300,11 @@ legacy `API_KEYS` in this mode; without them it returns HTTP 503.
 With login enabled, environment `API_KEYS` are ignored: create user-bound
 keys in User management after the target account has changed its assigned
 password. Keys inherit that user's current permissions and are shown only
-once. See [API documentation](./docs/api.md).
+once. If a key is lost, superadmins can **Regenerate** it in User management.
+The old key stops working immediately; the replacement is shown once and
+keeps the same name and user. Update connected applications with the new key.
+Regeneration also ends that user's documentation sessions, but leaves browser
+app sessions and other API keys intact. See [API documentation](./docs/api.md).
 
 Passwords are salted scrypt hashes. Sessions use random, hashed server-side
 tokens and `HttpOnly`, `SameSite=Lax` cookies, expiring after 12 hours.

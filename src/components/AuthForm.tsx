@@ -4,14 +4,18 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/lib/locale";
 import type { Identity } from "@/lib/auth/permissions";
+import { defaultPasswordPolicy, passwordPolicyError, type PasswordPolicy } from "@/lib/auth/passwordPolicy";
+import { PasswordRequirements } from "./PasswordRequirements";
 
 type Field = "username" | "oldPassword" | "password" | "confirmation";
 const fieldForError: Record<string, Field> = {
   usernameUnchanged: "username", usernameTaken: "username", invalidLogin: "oldPassword",
   passwordUnchanged: "password", passwordTooShort: "password", passwordMismatch: "confirmation",
+  passwordTooLong: "password", passwordReserved: "password", passwordUppercase: "password",
+  passwordLowercase: "password", passwordNumber: "password", passwordSpecial: "password",
 };
 
-export function AuthForm({ user }: { user?: Identity }) {
+export function AuthForm({ user, passwordPolicy = defaultPasswordPolicy }: { user?: Identity; passwordPolicy?: PasswordPolicy }) {
   const { t } = useLocale();
   const router = useRouter();
   const [error, setError] = useState("");
@@ -29,9 +33,9 @@ export function AuthForm({ user }: { user?: Identity }) {
     if (user) {
       const oldPassword = value("oldPassword");
       const localError = user.mustChangeUsername && username.toLowerCase() === "admin" ? "usernameUnchanged"
-        : password.length < 12 ? "passwordTooShort"
-        : password === oldPassword ? "passwordUnchanged"
-        : password !== value("confirmation") ? "passwordMismatch" : "";
+        : passwordPolicyError(password, passwordPolicy) ?? (
+          password === oldPassword ? "passwordUnchanged"
+          : password !== value("confirmation") ? "passwordMismatch" : "");
       if (localError) { setError(localError); return; }
       await send({ action: "change", username, oldPassword, password });
     } else await send({ action: "login", username, password });
@@ -70,11 +74,12 @@ export function AuthForm({ user }: { user?: Identity }) {
       </label>}
       <label className="text-sm">{t(user ? "auth.newPassword" : "auth.password")}
         <input id="auth-password" name="password" className={inputClass("password")} aria-invalid={invalid("password")}
-          type={passwordType} required minLength={user ? 12 : 1} maxLength={128} autoComplete={user ? "new-password" : "current-password"} />
+          type={passwordType} required minLength={user ? passwordPolicy.minLength : 1} maxLength={128} autoComplete={user ? "new-password" : "current-password"} />
       </label>
+      {user && <PasswordRequirements policy={passwordPolicy} />}
       {user && <label className="text-sm">{t("auth.confirmPassword")}
         <input id="auth-confirmation" name="confirmation" className={inputClass("confirmation")} aria-invalid={invalid("confirmation")}
-          type={passwordType} required minLength={12} maxLength={128} autoComplete="new-password" />
+          type={passwordType} required minLength={passwordPolicy.minLength} maxLength={128} autoComplete="new-password" />
       </label>}
       {user && <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={showPasswords} onChange={(event) => setShowPasswords(event.target.checked)} />

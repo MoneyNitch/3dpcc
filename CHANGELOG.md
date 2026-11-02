@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- API key regeneration in User management, replacing a lost key immediately
+  while retaining its name and user and displaying the replacement only once.
+- Configurable password requirements in User management: minimum length from
+  4 to 128 characters and optional uppercase, lowercase, digit and special
+  character requirements. Rules apply to new, reset and changed passwords;
+  existing passwords remain valid.
+
 ## v0.7.0 — REST API, multi-plate projects and document previews
 
 ### Added

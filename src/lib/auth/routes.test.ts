@@ -42,8 +42,8 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
       });
     }
     const cookie = (response) => response.headers.get("set-cookie").split(";")[0];
-    async function login(username, password) {
-      const response = await auth.POST(request("POST", { action: "login", username, password }));
+    async function login(username, password, rememberMe = false) {
+      const response = await auth.POST(request("POST", { action: "login", username, password, rememberMe }));
       assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
       return response;
     }
@@ -62,6 +62,7 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
     for (const [method, handler] of writes) assert.equal((await handler(request(method, {}))).status, 401);
     const initial = await login("admin", "admin");
     const initialCookie = cookie(initial);
+    assert.match(initial.headers.get("set-cookie"), /Max-Age=43200/);
     assert.equal((await initial.json()).redirect, "/account");
     assert.equal((await prints.GET(request("GET", undefined, initialCookie))).status, 403);
     assert.equal((await users.GET(request("GET", undefined, initialCookie))).status, 403);
@@ -70,6 +71,10 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
     const ownerCookie = cookie(changed);
     assert.equal((await prints.GET(request("GET", undefined, initialCookie))).status, 401);
     const owner = (await auth.GET(request("GET", undefined, ownerCookie)).then((r) => r.json())).user;
+    const rememberedLogin = await login("owner", password, true);
+    const rememberedCookie = cookie(rememberedLogin);
+    assert.match(rememberedLogin.headers.get("set-cookie"), /Max-Age=2592000/);
+    assert.equal((await auth.GET(request("GET", undefined, rememberedCookie)).then((r) => r.json())).user.id, owner.id);
     assert.equal((await users.GET(request("GET", undefined, ownerCookie))).status, 200);
     const createReader = await users.POST(request("POST", { action: "saveUser", data: { username: "reader", roleId: "viewer", active: true, password } }, ownerCookie));
     assert.equal(createReader.status, 200);

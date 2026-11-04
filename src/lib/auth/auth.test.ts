@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createAuthStore, AuthError, hashPassword, verifyPassword } from "./store";
+import { createAuthStore, AuthError, hashPassword, rememberedSessionSeconds, sessionSeconds, verifyPassword } from "./store";
 import { apiPermission, hasPermission } from "./permissions";
 import { canUpdateSettings } from "./settings";
 import { defaultSettings } from "../db/shared";
@@ -105,6 +105,18 @@ test("passwords use salted hashes and reject incorrect values", async () => {
   assert.equal(await verifyPassword(password, first), true);
   assert.equal(await verifyPassword("incorrect", first), false);
   assert.ok(!first.includes(password));
+});
+
+test("remembered sessions last 30 days while regular sessions expire after 12 hours", async () => {
+  const { store, owner } = await fixture();
+  try {
+    const regular = await store.login(owner.username, password);
+    const remembered = await store.login(owner.username, password, Date.now(), true);
+    const now = Date.now();
+    assert.equal(store.session(regular.token, now + (sessionSeconds + 1) * 1000), null);
+    assert.equal(store.session(remembered.token, now + (sessionSeconds + 1) * 1000)?.id, owner.id);
+    assert.equal(store.session(remembered.token, now + (rememberedSessionSeconds + 1) * 1000), null);
+  } finally { store.close(); }
 });
 
 test("bootstrap is atomic, persistent and requires both credentials to change", async () => {
@@ -319,6 +331,8 @@ test("environment switch fails closed, origin checks prevent CSRF, cookies have 
     const response = Response.json({ ok: true });
     setSessionCookie(response, request, "test-token");
     assert.match(response.headers.get("set-cookie")!, /HttpOnly; SameSite=Lax; Max-Age=43200; Secure/);
+    setSessionCookie(response, request, "remembered-token", rememberedSessionSeconds);
+    assert.match(response.headers.get("set-cookie")!, /Max-Age=2592000/);
     assert.equal(response.headers.get("cache-control"), "private, no-store");
   } finally {
     for (const [name, value] of Object.entries({ AUTH_ENABLED: saved.enabled, AUTH_ORIGIN: saved.origin, AUTH_COOKIE_SECURE: saved.secure })) {

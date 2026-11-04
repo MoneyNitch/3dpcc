@@ -50,6 +50,7 @@ interface UserRow {
 interface TokenRow { id: string; user_id: string; name: string; created_at: number }
 export interface ApiKeyView { id: string; userId: string; name: string; createdAt: number }
 export const sessionSeconds = 12 * 60 * 60;
+export const rememberedSessionSeconds = 30 * 24 * 60 * 60;
 
 export function createAuthStore(file: string) {
   const db = new Database(file);
@@ -143,10 +144,11 @@ export function createAuthStore(file: string) {
     const row = db.prepare("SELECT user_id FROM auth_sessions WHERE hash = ? AND expires_at > ? AND scope = ?").get(digest(token), now, scope) as { user_id: string } | undefined;
     return row ? identity(row.user_id) : null;
   }
-  function newSession(id: string, scope = "app"): string {
+  function newSession(id: string, scope = "app", lifetimeSeconds?: number): string {
     const token = randomBytes(32).toString("base64url");
     db.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(Date.now());
-    db.prepare("INSERT INTO auth_sessions VALUES (?, ?, ?, ?)").run(digest(token), id, Date.now() + (scope === "docs" ? 3600 : sessionSeconds) * 1000, scope);
+    const lifetime = lifetimeSeconds ?? (scope === "docs" ? 3600 : sessionSeconds);
+    db.prepare("INSERT INTO auth_sessions VALUES (?, ?, ?, ?)").run(digest(token), id, Date.now() + lifetime * 1000, scope);
     return token;
   }
   function throttle(username: string, now: number) {
@@ -159,7 +161,7 @@ export function createAuthStore(file: string) {
       }
     }).immediate();
   }
-  async function login(username: string, password: string, now = Date.now()) {
+  async function login(username: string, password: string, now = Date.now(), rememberMe = false) {
     await initialize();
     throttle(username, now);
     const row = db.prepare("SELECT * FROM auth_users WHERE username = ?").get(username) as UserRow | undefined;
@@ -170,7 +172,10 @@ export function createAuthStore(file: string) {
     const current = userRow(row.id);
     if (!current?.active || current.password_hash !== row.password_hash) throw new AuthError(401, "invalidLogin");
     db.prepare("DELETE FROM auth_attempts WHERE bucket = ?").run(`user:${username}`);
-    return { token: newSession(row.id), user: identity(row.id)! };
+    return {
+      token: newSession(row.id, "app", rememberMe ? rememberedSessionSeconds : sessionSeconds),
+      user: identity(row.id)!,
+    };
   }
   async function changeCredentials(id: string, username: string, oldPassword: string, password: string) {
     username = usernameSchema.parse(username);

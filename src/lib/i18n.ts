@@ -12,6 +12,7 @@ const strings: Record<string, Record<Language, string>> = {
   "auth.userMenu": { de: "Benutzermenü", en: "User menu" },
   "auth.username": { de: "Benutzername", en: "Username" },
   "auth.password": { de: "Passwort", en: "Password" },
+  "auth.rememberMe": { de: "Angemeldet bleiben (maximal 30 Tage, danach erneut anmelden)", en: "Stay signed in (up to 30 days, then sign in again)" },
   "auth.oldPassword": { de: "Aktuelles Passwort", en: "Current password" },
   "auth.newPassword": { de: "Neues Passwort", en: "New password" },
   "auth.confirmPassword": { de: "Neues Passwort wiederholen", en: "Confirm new password" },

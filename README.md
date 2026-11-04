@@ -326,7 +326,10 @@ Regeneration also ends that user's documentation sessions, but leaves browser
 app sessions and other API keys intact. See [API documentation](./docs/api.md).
 
 Passwords are salted scrypt hashes. Sessions use random, hashed server-side
-tokens and `HttpOnly`, `SameSite=Lax` cookies, expiring after 12 hours.
+tokens and `HttpOnly`, `SameSite=Lax` cookies. By default, sessions expire after
+12 hours. The login form's **Stay signed in** option persists the cookie across
+browser restarts and extends that limit to 30 days; it is an absolute expiry, not
+sliding, so you must sign in again after 30 days.
 Logout revokes the current session. Changing credentials, resetting/editing/
 disabling/deleting users or changing their custom role revokes their sessions
 and API keys. Login attempts are rate-limited persistently (10 attempts per

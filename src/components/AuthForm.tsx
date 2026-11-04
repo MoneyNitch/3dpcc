@@ -38,9 +38,9 @@ export function AuthForm({ user, passwordPolicy = defaultPasswordPolicy }: { use
           : password !== value("confirmation") ? "passwordMismatch" : "");
       if (localError) { setError(localError); return; }
       await send({ action: "change", username, oldPassword, password });
-    } else await send({ action: "login", username, password });
+    } else await send({ action: "login", username, password, rememberMe: form.get("rememberMe") === "on" });
   }
-  async function send(payload: Record<string, string>) {
+  async function send(payload: Record<string, string | boolean>) {
     setBusy(true);
     try {
       const response = await fetch("/api/auth", {
@@ -76,6 +76,10 @@ export function AuthForm({ user, passwordPolicy = defaultPasswordPolicy }: { use
         <input id="auth-password" name="password" className={inputClass("password")} aria-invalid={invalid("password")}
           type={passwordType} required minLength={user ? passwordPolicy.minLength : 1} maxLength={128} autoComplete={user ? "new-password" : "current-password"} />
       </label>
+      {!user && <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="rememberMe" />
+        {t("auth.rememberMe")}
+      </label>}
       {user && <PasswordRequirements policy={passwordPolicy} />}
       {user && <label className="text-sm">{t("auth.confirmPassword")}
         <input id="auth-confirmation" name="confirmation" className={inputClass("confirmation")} aria-invalid={invalid("confirmation")}

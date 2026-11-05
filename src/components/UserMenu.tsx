@@ -5,7 +5,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/lib/locale";
 
-export function UserMenu({ username }: { username: string }) {
+export function UserMenu({
+  username,
+  showSettings,
+  showStatistics,
+  showApi,
+}: {
+  username: string;
+  showSettings: boolean;
+  showStatistics: boolean;
+  showApi: boolean;
+}) {
   const router = useRouter();
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
@@ -53,7 +63,22 @@ export function UserMenu({ username }: { username: string }) {
         <span aria-hidden="true" className={`text-xs transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+        <div role="menu" className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+          {showSettings && <Link role="menuitem" href="/settings" onClick={() => setOpen(false)} className={itemClass}>{t("nav.settings")}</Link>}
+          {showStatistics && <Link role="menuitem" href="/statistics" onClick={() => setOpen(false)} className={itemClass}>{t("nav.statistics")}</Link>}
+          {showApi && (
+            <Link
+              role="menuitem"
+              href="/api/v1/docs"
+              prefetch={false}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className={itemClass}
+            >
+              {t("nav.api")}
+            </Link>
+          )}
           <Link role="menuitem" href="/account" onClick={() => setOpen(false)} className={itemClass}>{t("auth.changePassword")}</Link>
           <button role="menuitem" type="button" disabled={busy} onClick={() => void logout()} className={itemClass}>{t("auth.logout")}</button>
           {error && <p role="alert" className="px-4 py-2 text-xs text-red-600 dark:text-red-400">{t("auth.error.serverError")}</p>}

@@ -16,6 +16,7 @@ export async function Header() {
   const ready = !enabled || Boolean(user && !user.mustChangePassword && !user.mustChangeUsername);
   const can = (permission: Parameters<typeof hasPermission>[1]) => ready && hasPermission(user, permission, enabled);
   const t = (key: string) => translate(lang, key, undefined, settings.customLanguagePacks);
+  const canUseApi = enabled ? can("api.use") : Boolean(process.env.API_KEYS?.trim());
   return (
     <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -25,13 +26,24 @@ export async function Header() {
           {can("documents.read") && <Link href="/invoices">{t("nav.invoices")}</Link>}
           {can("documents.read") && <Link href="/quotes">{t("nav.quotes")}</Link>}
           {can("documents.read") && <Link href="/orders">{t("nav.orders")}</Link>}
-          {can("settings.read") && <Link href="/settings">{t("nav.settings")}</Link>}
-          {(enabled ? can("api.use") : process.env.API_KEYS?.trim()) && (
-            <Link href="/api/v1/docs" prefetch={false} target="_blank" rel="noopener noreferrer">
-              {translate(lang, "nav.api", undefined, settings.customLanguagePacks)}
-            </Link>
+          {enabled && user ? (
+            <UserMenu
+              username={user.username}
+              showSettings={can("settings.read")}
+              showStatistics={can("documents.read")}
+              showApi={Boolean(canUseApi)}
+            />
+          ) : (
+            <>
+              {can("documents.read") && <Link href="/statistics">{t("nav.statistics")}</Link>}
+              {can("settings.read") && <Link href="/settings">{t("nav.settings")}</Link>}
+              {canUseApi && (
+                <Link href="/api/v1/docs" prefetch={false} target="_blank" rel="noopener noreferrer">
+                  {translate(lang, "nav.api", undefined, settings.customLanguagePacks)}
+                </Link>
+              )}
+            </>
           )}
-          {enabled && user && <UserMenu username={user.username} />}
           <ThemeToggle initialTheme={theme} />
         </nav>
       </div>

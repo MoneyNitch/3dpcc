@@ -7,6 +7,7 @@ import { useLocale } from "@/lib/locale";
 import type { AppSettings, InvoiceTemplate } from "@/lib/types";
 import { InvoiceDesigner } from "./InvoiceDesigner";
 import { Modal } from "./Modal";
+import { usePermission } from "@/lib/auth/context";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
@@ -41,10 +42,12 @@ export function InvoiceTemplateBuilder({
   documentTitle?: string;
 }) {
   const { t } = useLocale();
+  const canEdit = usePermission("documents.write");
   const [settings, setSettings] = useState(initialSettings);
   const templates = settings[templatesKey];
   const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0]?.id ?? "");
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -96,18 +99,25 @@ export function InvoiceTemplateBuilder({
   }
 
   async function save() {
-    await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...settings, setupCompleted: true }),
-    });
-    setSaved(true);
+    setSaveError(false); setSaved(false);
+    try {
+      const latestResponse = await fetch("/api/settings", { cache: "no-store" });
+      if (!latestResponse.ok) throw new Error(`Settings read failed (${latestResponse.status}).`);
+      const latest: { settings: AppSettings } = await latestResponse.json();
+      const response = await fetch("/api/settings", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...latest.settings, [templatesKey]: templates }),
+      });
+      if (!response.ok) throw new Error(`Template save failed (${response.status}).`);
+      setSaved(true);
+    } catch (error) { console.error("Template save failed:", error); setSaveError(true); }
   }
 
   if (!template) return null;
 
   return (
     <div className="flex flex-col gap-4">
+      {saveError && <p role="alert" className="text-red-600 dark:text-red-400">{t("settings.saveFailed")}</p>}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
         <select
           value={template.id}
@@ -121,12 +131,14 @@ export function InvoiceTemplateBuilder({
           ))}
         </select>
         <input
+          disabled={!canEdit}
           value={template.name}
           onChange={(event) => updateTemplate({ name: event.target.value })}
           className={`max-w-xs ${inputClass}`}
         />
         <button
           type="button"
+          disabled={!canEdit}
           onClick={addTemplate}
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
         >
@@ -135,7 +147,7 @@ export function InvoiceTemplateBuilder({
         <button
           type="button"
           onClick={removeTemplate}
-          disabled={templates.length <= 1}
+          disabled={!canEdit || templates.length <= 1}
           className="text-sm font-medium text-red-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
         >
           {t("invoice.deleteTemplate")}
@@ -151,6 +163,7 @@ export function InvoiceTemplateBuilder({
           </button>
           <button
             type="button"
+            disabled={!canEdit}
             onClick={save}
             className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
           >
@@ -159,9 +172,9 @@ export function InvoiceTemplateBuilder({
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <fieldset disabled={!canEdit} className={`rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 ${canEdit ? "" : "pointer-events-none"}`}>
         <InvoiceDesigner template={template} onChange={updateTemplate} />
-      </div>
+      </fieldset>
 
       {previewOpen && (
         <Modal title={t("invoice.preview")} onClose={() => setPreviewOpen(false)} wide>

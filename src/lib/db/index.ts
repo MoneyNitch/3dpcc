@@ -1,6 +1,6 @@
-import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
+import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { resolveDbConnection, type ResolvedDbConnection } from "../dbConfig";
-import type { DataStore } from "./shared";
+import type { ApplicationDataSnapshot, DataStore } from "./shared";
 import { originalArchives } from "../originalArchives";
 
 // The active backend is resolved from the DB config saved via Settings (data/db-config.json),
@@ -84,8 +84,9 @@ export async function updatePrintName(id: string, displayName: string): Promise<
 }
 
 export async function deletePrint(id: string): Promise<void> {
+  const store = await getStore();
+  await store.deletePrint(id);
   await originalArchives.remove(id);
-  await (await getStore()).deletePrint(id);
 }
 
 export async function getPrintCostInputs(id: string): Promise<PrintCostInputs | null> {
@@ -94,6 +95,40 @@ export async function getPrintCostInputs(id: string): Promise<PrintCostInputs | 
 
 export async function savePrintCostInputs(id: string, inputs: PrintCostInputs): Promise<void> {
   return (await getStore()).savePrintCostInputs(id, inputs);
+}
+
+export async function listOrders(): Promise<PrintOrder[]> {
+  return (await getStore()).listOrders();
+}
+
+export async function saveOrder(order: PrintOrder): Promise<void> {
+  return (await getStore()).saveOrder(order);
+}
+
+export async function deleteOrder(id: string): Promise<void> {
+  return (await getStore()).deleteOrder(id);
+}
+
+export async function getApplicationDataSnapshot(): Promise<ApplicationDataSnapshot> {
+  const store = await getStore();
+  const [settings, prints, orders] = await Promise.all([
+    store.getSettings(),
+    store.listPrints(),
+    store.listOrders(),
+  ]);
+  return {
+    settings,
+    orders,
+    prints: await Promise.all(prints.map(async (print) => ({
+      print,
+      costInputs: await store.getPrintCostInputs(print.id),
+      models: await store.listPrintModels(print.id),
+    }))),
+  };
+}
+
+export async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
+  return (await getStore()).replaceApplicationData(data);
 }
 
 /** Copies all application data into a verified target store before it becomes active. */
@@ -116,5 +151,8 @@ export async function transferDatabaseData(targetConnection: ResolvedDbConnectio
     }
     const inputs = await source.getPrintCostInputs(print.id);
     if (inputs) await target.savePrintCostInputs(print.id, inputs);
+  }
+  for (const order of await source.listOrders()) {
+    await target.saveOrder(order);
   }
 }

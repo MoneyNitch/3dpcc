@@ -1,13 +1,46 @@
 # REST-API v1
 
 Die versionierte Schnittstelle unter `/api/v1` stellt die vorhandenen
-Anwendungsfunktionen für Automatisierung bereit. Alle Keys haben vollständigen
-Lese- und Schreibzugriff. Änderungen sind sofort in der Oberfläche sichtbar.
+Anwendungsfunktionen für Automatisierung bereit. Bei aktiviertem Login
+(Standard) sind Keys an Benutzer und deren Rollenrechte gebunden.
+Änderungen sind sofort in der Oberfläche sichtbar.
 
 ## Aktivierung und API-Keys
 
-Keys werden vorerst **ausschließlich über die Server-Umgebung** verwaltet.
-Es gibt keine Key-Erstellung in der Oberfläche oder über einen API-Endpunkt.
+### Mit Login (Standard)
+
+Zuerst mit `admin/admin` anmelden und Benutzername sowie Passwort verpflichtend
+ändern. Das Startkonto ist Superadmin. Unter **Einstellungen → Benutzerverwaltung** Benutzer,
+Custom-Rollen und API-Schlüssel verwalten. Schlüssel können nur für aktive
+Benutzer mit `API verwenden`-Recht erstellt werden, nachdem diese ihr
+vorgegebenes Passwort geändert haben. Sie werden nur einmal angezeigt;
+gespeichert wird ausschließlich ihr SHA-256-Hash.
+
+Bei einem vergessenen Schlüssel kann ein Superadmin **Neu generieren** wählen.
+Nach Bestätigung wird der alte Schlüssel sofort ungültig und der neue einmalig
+angezeigt. Bezeichnung und Benutzer bleiben erhalten; verbundene Anwendungen
+müssen auf den neuen Schlüssel umgestellt werden. Dies funktioniert auch beim
+Limit von 10 Schlüsseln. Dokumentations-Sitzungen dieses Benutzers werden
+beendet; normale Browser-Sitzungen und andere API-Schlüssel bleiben gültig.
+
+Jeder Aufruf prüft die aktuelle Rolle: Viewer dürfen lesen und
+`POST /prints/{id}/calculate` verwenden, aber keine Drucke oder Einstellungen
+ändern. Dokumenterzeugung benötigt Dokument-Schreibrechte und Druck-Leserechte.
+Custom-Rollen steuern Drucke, Dokumente und Einstellungen getrennt.
+Änderungen an Vorlagen und Nummerierung erfordern Dokument-Schreibrechte,
+auch über `PUT/PATCH /settings`. Fehlende Rechte ergeben **403**, fehlende
+oder ungültige Schlüssel **401**.
+
+Benutzeränderungen, Passwortänderungen/-resets, Deaktivieren/Löschen und
+Änderungen der zugewiesenen Custom-Rolle widerrufen die vorhandenen Schlüssel.
+Einzelne Schlüssel können separat widerrufen werden. Ein Browser-Login oder
+Dokumentations-Cookie ersetzt keinen API-Schlüssel. Schlüssel ermöglichen
+keine Benutzerverwaltung. Umgebungs-`API_KEYS` werden in diesem Modus ignoriert.
+
+### Ohne Login (AUTH_ENABLED=false)
+
+Nur in diesem Modus werden Keys über die Server-Umgebung verwaltet.
+Diese Legacy-Keys haben vollständigen Lese- und Schreibzugriff auf `/api/v1`.
 Einen kryptografisch zufälligen Key lokal erzeugen:
 
 ```powershell
@@ -17,6 +50,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 Den ausgegebenen Wert in `.env.local` eintragen:
 
 ```dotenv
+AUTH_ENABLED=false
 API_KEYS=<erster-key>,<zweiter-key>
 ```
 
@@ -42,11 +76,13 @@ Keys in URLs oder Query-Parametern werden nicht unterstützt. Es gibt keine
 Browser-CORS-Freigabe für fremde Origins. Über nicht vertrauenswürdige Netze
 HTTPS verwenden.
 
-**Wichtig:** Der Key-Schutz gilt nur für `/api/v1`, nicht für die bestehenden
-internen `/api/*`-Endpunkte oder die Oberfläche. Er ist kein globaler
-Authentifizierungsschutz der Anwendung. 3D-PCC weiterhin ausschließlich im
-vertrauenswürdigen privaten Netzwerk betreiben. Für öffentliche Bereitstellung
-wäre eine separate Zugriffssicherung der gesamten Anwendung erforderlich.
+**Wichtig:** Mit `AUTH_ENABLED=false` sind Oberfläche und interne `/api/*`-
+Endpunkte ungeschützt; nur `/api/v1` verlangt Legacy-Keys. Diesen Modus
+ausschließlich im vertrauenswürdigen privaten Netzwerk verwenden.
+Mit aktiviertem Login sind auch Oberfläche und interne APIs durch Anmeldung
+und Rollenprüfung geschützt. Bei HTTPS hinter einem Reverse Proxy
+`AUTH_ORIGIN` (öffentliche Origin inklusive Port) und `AUTH_COOKIE_SECURE=true`
+setzen. Siehe [Login-Dokumentation](../README.md#login-and-roles).
 
 ## Geschützte OpenAPI-Ansicht
 
@@ -58,10 +94,13 @@ Die Ansicht bietet eine Endpunkt-Suche, breite Operationskarten und vergrößert
 Eingabefelder. Helles bzw. dunkles Farbschema folgt der Browser-/Systemeinstellung;
 auf kleinen Bildschirmen werden Operationsbeschreibungen unter dem Pfad angezeigt.
 
-Die Anmeldung setzt eine signierte, eine Stunde gültige `HttpOnly`-Sitzung
+Die Anmeldung setzt eine `HttpOnly`-Sitzung mit einer Stunde Gültigkeit
 (`SameSite=Strict`, bei HTTPS zusätzlich `Secure`), die ausschließlich für
-Dokumentationsressourcen gilt. Das Entfernen des zugehörigen API-Keys widerruft
-auch diese Sitzung. **Authorize** benötigt für echte API-Aufrufe nochmals den
+Dokumentationsressourcen gilt. Bei aktiviertem Login wird sie serverseitig
+gespeichert, ohne Login wie bisher signiert. Das Widerrufen eines Benutzer-
+Keys widerruft alle Dokumentationssitzungen dieses Benutzers; das Entfernen
+eines Legacy-Keys widerruft dessen Sitzung. Diese Sitzungen erlauben keinen
+Browser-Login. **Authorize** benötigt für echte API-Aufrufe nochmals den
 Key, ohne `Bearer`-Präfix. Swagger hält ihn nur im Tab-Arbeitsspeicher, nicht in
 Local Storage. Abmelden oder Neuladen entfernt diese Autorisierung.
 

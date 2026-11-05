@@ -5,6 +5,7 @@ import { getSettings } from "@/lib/db";
 import { getDbConfigView } from "@/lib/dbConfig";
 import { getFilamentConnectionsView } from "@/lib/filamentConfig";
 import { getPreviewQueue } from "@/lib/previewQueue";
+import { authorize } from "@/lib/auth/server";
 
 export const runtime = "nodejs";
 
@@ -115,13 +116,17 @@ async function getDiagnostics() {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await authorize(request, "support.export");
+  if (denied) return denied;
   return NextResponse.json(await getDiagnostics(), {
     headers: { "Cache-Control": "no-store" },
   });
 }
 
 export async function POST(request: NextRequest) {
+  const denied = await authorize(request, "support.export");
+  if (denied) return denied;
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (!Number.isFinite(contentLength) || contentLength > 128_000) {
     return NextResponse.json({ error: "Support report is too large." }, { status: 413 });

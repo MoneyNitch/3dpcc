@@ -22,7 +22,9 @@ tower and total) and multi-color information, and calculates print costs.
 
 ## Features
 
-- Versioned REST API with environment-configured API keys and a protected,
+- Login, user management and viewer/admin/superadmin/custom roles, with
+  user-bound API keys and an environment switch for local login-free operation.
+- Versioned REST API with role-checked API keys and a protected,
   locally served Swagger/OpenAPI view at `/api/v1/docs`.
   See [API documentation](./docs/api.md) for setup, endpoints and examples.
   This protects only `/api/v1`, not the existing UI or internal endpoints.
@@ -45,7 +47,31 @@ tower and total) and multi-color information, and calculates print costs.
 - Invoice and quote export dialogs offer a preview with the current print,
   costs and customer details before downloading or printing. Previewing does
   not advance the document numbering counter; return to details to edit it.
-- Read-only Spoolman and FilaMan System connections with per-filament spool
+- Order management at **Orders** stores a customer, status, due date, notes,
+  and saved prints with quantities. Prints linked to an order cannot be deleted
+  until the order is changed or removed.
+  Search customers and combine status, priority and due-date filters with sorting.
+  Completed orders are hidden by default; select **All** or **Completed** in the
+  status filter to show them. Due dates use the browser's local calendar day:
+  active orders due before today are highlighted in red with an **Overdue** badge
+  (completed and cancelled orders are never marked overdue). Due-date filters offer
+  overdue, today, future and undated orders. Resetting filters restores the default
+  view without changing the selected sort order.
+- Open an order to view its details, G-code attachment and independent calculation.
+  Edit per-unit material, accessory, electricity and machine costs for each position;
+  position quantities come from the order. Labor, packaging and shipping are charged
+  once per order. Margin, an explicit order discount and tax apply to the total.
+  Per-print labor, packaging, margin, tax and quantity discounts are not added again.
+  **Save calculation** freezes the order's own prices, hourly rate and currency
+  without changing print calculations or inventory. Later price changes do not
+  affect saved orders. **Apply current print costs and save** requires confirmation
+  and replaces custom position prices with current print costs and order quantities.
+  Changing order positions flags the old snapshot until explicitly recalculated.
+  Currency changes are not automatically converted. Snapshots are included in backups;
+  completed-order statistics use them, with the original calculation fallback for
+  older orders without a snapshot. Statistics show different currencies separately
+  rather than adding or converting their values.
+- Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
 - Interactive 3D preview: embedded model meshes when available, otherwise a
   complete G-code toolpath preview (including XY arcs), rendered using WebGL2
@@ -74,6 +100,22 @@ temporary 3D queue, even when PostgreSQL/MySQL is used or 3D previews are disabl
 Allow sufficient disk space, preserve write permissions, and back up this
 directory with the database. Backend transfers on the same instance retain this
 local directory; moving to another host requires copying it as well.
+
+### Backup and restore
+
+Superadmins and custom roles with database-management permission can create and
+restore backups under **Settings → Database**. Each `.3dpcc` backup is encrypted
+with AES-256-GCM using a passphrase-derived key; choose a strong passphrase and
+store it separately because it cannot be recovered.
+
+The archive includes application settings, prints and cost inputs, saved 3D
+models, orders, users, password/API-key hashes and roles, Spoolman/FilaMan
+connection settings, retained original uploads, and local preview-queue files.
+Backups and restores are limited to 512 MB. Restore validates the archive, then
+replaces those application records and local files; the database connection
+configuration and environment variables of the current installation are not
+changed. Restoring replaces the user database too, so active sessions are invalidated and you must
+sign in again with an account from the backup.
 
 ### Background 3D calculation on slower systems
 
@@ -152,7 +194,19 @@ and invoice calculations do not require a live connection and do not silently
 change when an external price changes. Load the inventory and choose **Use current
 spool price** to explicitly update a selection. A manual price override remains
 possible. Local materials and their prices are not imported or modified.
-**No filament consumption or stock changes are sent to either service.**
+Selecting a spool or saving costs never changes inventory. Use **Deduct consumption**
+in the calculator to book actual usage, and explicitly confirm the displayed
+grams before submitting. Consumption includes the selected plate(s) multiplied by
+quantity and is grouped per spool. The current external stock is checked first;
+unknown or insufficient stock is rejected. FilaMan requires the additional
+`spool_events:create_consumption` permission. Spoolman uses
+`PUT /api/v1/spool/{id}/use`; FilaMan uses
+`POST /api/v1/spools/{id}/consumptions`.
+
+There are no automatic retries. If a request times out or its result is uncertain,
+check the external inventory before trying again: the booking may already have
+succeeded. This is an explicit consumption booking, not an automatic print tracker;
+booking again after reloading the page deducts material again.
 
 The integration uses Spoolman's `/api/v1/spool` list and FilaMan System's
 paginated `/api/v1/spools` API. Results are limited to 10,000 spools per service,
@@ -244,6 +298,97 @@ On first startup, `data/3d-pcc.db` and the local database configuration are
 created automatically when needed. These files contain prints, settings and
 invoice data and are intentionally excluded from the repository by
 `.gitignore`.
+
+### Login and roles
+
+Login is **enabled by default**. On the first login use **admin / admin**.
+This initial account is a **superadmin** and must change **both its username
+and password before accessing the application**, including setup and APIs.
+New passwords default to 12–128 characters; usernames have 3–64 characters
+(`A–Z`, `a–z`, `0–9`, `.`, `_`, `-`) and are stored lowercase.
+Secure this known initial account immediately, before exposing the server to
+other users. There is no public registration.
+
+Superadmins use **Settings → User management** to create, edit,
+disable or delete accounts, reset passwords, define named custom roles and
+issue/revoke user-bound API keys. New/reset passwords must be changed at the
+next login. Click your username in the navigation to open the user menu with
+**Change password** and **Sign out**.
+
+Under **Password requirements**, superadmins can set the minimum length
+(4–128 characters) and independently require uppercase letters, lowercase
+letters, digits and special characters (whitespace does not count as a
+special character). Save these rules before creating or resetting passwords.
+They are enforced server-side for new, reset and changed passwords; existing
+passwords, sessions and API keys remain valid when the rules change. The known
+initial password `admin` remains disallowed as a new password. Short passwords
+are easier to guess; at least 12 characters are recommended, especially for
+network-accessible deployments. The rules are stored in the local authentication
+database, independently of normal application settings and the print database.
+
+| Role | Permissions |
+|---|---|
+| Viewer | View prints, calculations, document templates and regular settings. Local calculation changes cannot be saved. |
+| Admin | Additionally create/edit/delete prints and edit invoices, quotes, templates, numbering and regular settings. |
+| Superadmin | Additionally manage users, roles, database connections/transfers, filament connections, support exports and API keys. |
+| Custom | Individually selected permissions; necessary read permissions are added automatically. User/role/API-key management remains superadmin-only. |
+
+Roles are enforced server-side on pages, internal APIs and `/api/v1`, not
+just by hiding buttons. An active superadmin must always remain; your own
+account cannot be deleted, disabled, demoted or reset through user management.
+Viewer calculations remain interactive locally, but persistence is forbidden.
+
+To disable **all browser login and role checks**, set in `.env.local`:
+
+```dotenv
+AUTH_ENABLED=false
+```
+
+Restart the server after changing environment values. With login disabled,
+the existing local UI/internal APIs are unrestricted and user management is
+hidden. Use this only on a trusted network. Existing accounts are preserved
+and become active again when login is re-enabled. `/api/v1` still requires
+legacy `API_KEYS` in this mode; without them it returns HTTP 503.
+With login enabled, environment `API_KEYS` are ignored: create user-bound
+keys in User management after the target account has changed its assigned
+password. Keys inherit that user's current permissions and are shown only
+once. If a key is lost, superadmins can **Regenerate** it in User management.
+The old key stops working immediately; the replacement is shown once and
+keeps the same name and user. Update connected applications with the new key.
+Regeneration also ends that user's documentation sessions, but leaves browser
+app sessions and other API keys intact. See [API documentation](./docs/api.md).
+
+Passwords are salted scrypt hashes. Sessions use random, hashed server-side
+tokens and `HttpOnly`, `SameSite=Lax` cookies. By default, sessions expire after
+12 hours. The login form's **Stay signed in** option persists the cookie across
+browser restarts and extends that limit to 30 days; it is an absolute expiry, not
+sliding, so you must sign in again after 30 days.
+Logout revokes the current session. Changing credentials, resetting/editing/
+disabling/deleting users or changing their custom role revokes their sessions
+and API keys. Login attempts are rate-limited persistently (10 attempts per
+username per 15 minutes, 100 total per minute).
+
+Authentication is stored separately in **`data/auth.db`**, irrespective of
+the print database backend. It remains local even with PostgreSQL/MySQL and
+is not copied by the print-database transfer or included in support exports.
+Back up and protect the complete `data/` directory; loss of the auth database
+recreates the known bootstrap credentials. Run one app instance per data
+directory and do not expose it without first securing the bootstrap account.
+
+For HTTPS behind a reverse proxy, set the exact public origin and force
+secure cookies:
+
+```dotenv
+AUTH_ORIGIN=https://3dpcc.example.com
+AUTH_COOKIE_SECURE=true
+```
+
+Without `AUTH_ORIGIN`, mutation requests must originate from the request
+host/protocol. Include the port if non-standard. HTTPS is required over
+untrusted networks. Docker Compose forwards all three auth variables from
+its `.env`. `AUTH_ENABLED` accepts only `true` or `false`; invalid values
+fail closed. Run `npm run test:auth` for authentication and route integration
+tests, and `npm run test:api` for legacy API regression tests.
 
 ### Installation scripts
 

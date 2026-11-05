@@ -4,10 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/lib/locale";
 import { usePlateSelection } from "@/lib/plateSelectionContext";
+import { usePermission } from "@/lib/auth/context";
 
 export function PrintPlateSelector({ printId }: { printId: string }) {
   const { plates, plate, allSelected, selectPlate, selectAllPlates } = usePlateSelection();
   const { t } = useLocale();
+  const canEdit = usePermission("prints.write");
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -101,7 +103,7 @@ export function PrintPlateSelector({ printId }: { printId: string }) {
             </button>
           );
         })}
-        {!allSelected && !editingName && <button type="button"
+        {canEdit && !allSelected && !editingName && <button type="button"
           onClick={() => {
             setPlateName(plate.plateName ?? t("print.plateNumber", { number: plate.plateIndex ?? plates.indexOf(plate) + 1 }));
             setMessage(null);
@@ -110,7 +112,7 @@ export function PrintPlateSelector({ printId }: { printId: string }) {
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700">
           {t("print.renamePlate")}
         </button>}
-        {plates.length > 1 && <button
+        {canEdit && plates.length > 1 && <button
           type="button"
           disabled={creating || savingName}
           onClick={() => void createIndividualPrints()}

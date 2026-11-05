@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { defaultSettings } from "../db/shared";
 import { calculateAllPlatesCost, defaultCostInputs } from "../costCalculator";
-import type { ParsedPrint, PrintCostInputs } from "../types";
+import type { ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { bearerKey, configuredKeys, createDocsSession, docsCookie, validDocsSession } from "./auth";
 import { handleDocs } from "./docs";
 import { ApiError, errorResponse, readBody } from "./http";
@@ -13,11 +13,16 @@ import { dispatchApi } from "./router";
 const key = "a".repeat(43);
 const secondKey = "b".repeat(43);
 let previousKeys: string | undefined;
+let previousAuth: string | undefined;
 beforeEach(() => {
+  previousAuth = process.env.AUTH_ENABLED;
+  process.env.AUTH_ENABLED = "false";
   previousKeys = process.env.API_KEYS;
   process.env.API_KEYS = `${key}, ${secondKey}`;
 });
 afterEach(() => {
+  if (previousAuth === undefined) delete process.env.AUTH_ENABLED;
+  else process.env.AUTH_ENABLED = previousAuth;
   if (previousKeys === undefined) delete process.env.API_KEYS;
   else process.env.API_KEYS = previousKeys;
 });
@@ -25,6 +30,7 @@ afterEach(() => {
 function fixture() {
   let settings = structuredClone(defaultSettings);
   const prints = new Map<string, ParsedPrint>();
+  const orders = new Map<string, PrintOrder>();
   const savedInputs = new Map<string, PrintCostInputs>();
   const calls: string[] = [];
   const dependencies: ApiDependencies = {
@@ -32,6 +38,7 @@ function fixture() {
       async getSettings() { calls.push("getSettings"); return structuredClone(settings); },
       async saveSettings(value) { settings = structuredClone(value); },
       async listPrints() { calls.push("listPrints"); return [...prints.values()]; },
+      async listOrders() { return [...orders.values()]; },
       async getPrint(id) { calls.push("getPrint"); return prints.get(id) ?? null; },
       async insertPrint(print) { prints.set(print.id, structuredClone(print)); },
       async savePrint(print) { prints.set(print.id, structuredClone(print)); },
@@ -62,7 +69,7 @@ function fixture() {
     const parts = new URL(request.url).pathname.slice("/api/v1/".length).split("/").map(decodeURIComponent);
     return dispatchApi(request, parts, operations, handleDocs);
   }
-  return { send, operations, dependencies, calls, prints, savedInputs };
+  return { send, operations, dependencies, calls, prints, orders, savedInputs };
 }
 const manual = { name: "Test", minutes: 60,
   filaments: [{ filamentId: "1", type: "PLA", color: "#CCCCCC", usedGramsTotal: 100 }] };
@@ -139,6 +146,25 @@ test("manual print CRUD persists inputs, calculations are read-only, deletion ca
   assert.equal((await f.send(`/prints/${print.id}`)).status, 404);
   assert.equal((await f.send(`/prints/${print.id}/cost-inputs`, "PUT", { quantity: 1 })).status, 404);
   assert.equal((await f.send(`/prints/${print.id}`, "DELETE")).status, 404);
+});
+
+test("prints linked to an order cannot be deleted through the versioned API", async () => {
+  const f = fixture();
+  const { print } = await (await f.send("/prints", "POST", manual)).json();
+  f.orders.set("order-id", {
+    id: "order-id",
+    customerName: "Customer",
+    status: "open",
+    dueDate: null,
+    notes: "",
+    items: [{ printId: print.id, quantity: 1 }],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const response = await f.send(`/prints/${print.id}`, "DELETE");
+  assert.equal(response.status, 409);
+  assert.equal(f.prints.has(print.id), true);
+  assert.equal(f.calls.includes("cancel"), false);
 });
 
 test("invalid data is rejected before side effects; missing/defaulted input behavior stays compatible", async () => {

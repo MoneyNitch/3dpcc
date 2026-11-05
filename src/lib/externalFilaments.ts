@@ -31,6 +31,24 @@ export function externalSpoolKey(spool: ExternalSpool): string {
   return `${spool.provider}:${spool.sourceUrl ?? ""}:${spool.id}`;
 }
 
+export function spoolConsumptionForFilaments(
+  filaments: { filamentId: string; usedGramsTotal: number }[],
+  selectedSpools: Record<string, ExternalSpool>,
+  quantity: number,
+): Map<string, { spool: ExternalSpool; grams: number }> {
+  const consumption = new Map<string, { spool: ExternalSpool; grams: number }>();
+  for (const filament of filaments) {
+    const spool = selectedSpools[filament.filamentId];
+    if (!spool) continue;
+    const key = externalSpoolKey(spool);
+    consumption.set(key, {
+      spool,
+      grams: (consumption.get(key)?.grams ?? 0) + filament.usedGramsTotal * quantity,
+    });
+  }
+  return consumption;
+}
+
 export type FilamentErrorCode = "connection" | "auth" | "response" | "limit" | "url";
 
 export class FilamentServiceError extends Error {
@@ -215,4 +233,37 @@ export async function fetchExternalSpools(
     if (count === 0) throw new FilamentServiceError("response");
   }
   throw new FilamentServiceError("limit");
+}
+
+export async function consumeExternalSpool(
+  provider: FilamentProvider,
+  connection: FilamentConnection,
+  id: number,
+  grams: number,
+): Promise<void> {
+  if (!Number.isSafeInteger(id) || id <= 0 || !Number.isFinite(grams) || grams <= 0) {
+    throw new FilamentServiceError("response");
+  }
+  const baseUrl = normalizeFilamentServiceUrl(connection.url);
+  const response = await fetch(baseUrl + (provider === "spoolman"
+    ? `/api/v1/spool/${id}/use`
+    : `/api/v1/spools/${id}/consumptions`), {
+    method: provider === "spoolman" ? "PUT" : "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(connection.apiKey ? {
+        Authorization: `${provider === "filaman" ? "ApiKey" : "Bearer"} ${connection.apiKey}`,
+      } : {}),
+    },
+    body: JSON.stringify(provider === "spoolman"
+      ? { use_weight: grams }
+      : { delta_weight_g: -grams, note: "3D-PCC: confirmed print consumption" }),
+    redirect: "error",
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  await response.body?.cancel();
+  if (!response.ok) {
+    throw new FilamentServiceError(response.status === 401 || response.status === 403 ? "auth" : "connection");
+  }
 }

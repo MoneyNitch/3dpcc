@@ -23,8 +23,10 @@ import { getCurrencyOptions } from "@/lib/currency";
 import packageJson from "../../package.json";
 import { PreviewQueueSettings } from "./PreviewQueueSettings";
 import { SupportExport } from "./SupportExport";
+import { useAuth } from "@/lib/auth/context";
+import { hasPermission } from "@/lib/auth/permissions";
 
-type SettingsTab = "general" | "support" | "database" | "filaments" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
+export type SettingsTab = "general" | "support" | "database" | "filaments" | "users" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
 
 type ImportedPrinterProfile = Omit<PrinterProfile, "id">;
 
@@ -79,13 +81,17 @@ function parsePrinterProfileExport(value: unknown): ImportedPrinterProfile[] | n
   return printers;
 }
 
-export function SettingsForm({ initialSettings, databaseSettings, filamentSettings }: {
+export function SettingsForm({ initialSettings, databaseSettings, filamentSettings, userSettings, initialTab = "general" }: {
   initialSettings: AppSettings;
   databaseSettings: ReactNode;
   filamentSettings: ReactNode;
+  userSettings?: ReactNode;
+  initialTab?: SettingsTab;
 }) {
   const router = useRouter();
   const { t, setLocale, lang } = useLocale();
+  const { enabled, user } = useAuth();
+  const can = (permission: Parameters<typeof hasPermission>[1]) => hasPermission(user, permission, enabled);
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -95,7 +101,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     type: "success" | "error";
     text: string;
   } | null>(null);
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [languagePackMessage, setLanguagePackMessage] = useState<{
     type: "success" | "error";
     text: string;
@@ -119,6 +125,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     { id: "queue", label: t("queue.title") },
     { id: "filaments", label: t("filamentDb.title") },
     { id: "database", label: t("db.title") },
+    { id: "users", label: t("auth.users") },
     { id: "support", label: t("support.title") },
   ];
 
@@ -390,7 +397,13 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     <div className="flex flex-col gap-6">
       {saveError && <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{t("settings.saveFailed")}</p>}
       <div role="tablist" aria-label={t("settings.title")} className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700">
-        {tabs.map((tab) => (
+        {tabs.filter((tab) =>
+          tab.id === "database" ? can("database.manage") :
+          tab.id === "filaments" ? can("integrations.manage") :
+          tab.id === "support" ? can("support.export") :
+          tab.id === "users" ? Boolean(userSettings) :
+          tab.id === "queue" ? can("prints.read") : true
+        ).map((tab) => (
           <button
             key={tab.id}
             id={`${tab.id}-settings-tab`}
@@ -416,7 +429,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
         aria-labelledby="support-settings-tab"
         hidden={activeTab !== "support"}
       >
-        <SupportExport />
+        {can("support.export") && <SupportExport />}
       </div>
 
       <div
@@ -437,6 +450,16 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
         {filamentSettings}
       </div>
 
+      <div
+        id="users-settings-panel"
+        role="tabpanel"
+        aria-labelledby="users-settings-tab"
+        hidden={activeTab !== "users"}
+      >
+        {userSettings}
+      </div>
+
+      <fieldset disabled={!can(activeTab === "numbering" ? "documents.write" : "settings.write")} className="contents">
       <section
         id="general-settings-panel"
         role="tabpanel"
@@ -995,9 +1018,11 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
         </div>
       </section>
 
-      {activeTab === "queue" && <PreviewQueueSettings />}
+      </fieldset>
+      {activeTab === "queue" && can("prints.read") && <PreviewQueueSettings />}
       <button
-        hidden={activeTab === "queue" || activeTab === "database" || activeTab === "filaments" || activeTab === "support"}
+        disabled={!can(activeTab === "numbering" ? "documents.write" : "settings.write")}
+        hidden={activeTab === "queue" || activeTab === "database" || activeTab === "filaments" || activeTab === "users" || activeTab === "support"}
         onClick={save}
         className="self-start rounded-lg bg-orange-500 px-5 py-2.5 font-medium text-white hover:bg-orange-600"
       >

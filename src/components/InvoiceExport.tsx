@@ -59,10 +59,11 @@ export function InvoiceExport({
   // Advances the shared counter in Settings so the next document suggests the following number.
   async function bumpNumberingCounter() {
     const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`Numbering read failed (${res.status}).`);
     const body = await res.json();
     const latest = body.settings as AppSettings;
     const current = latest.numbering[kind];
-    await fetch("/api/settings", {
+    const response = await fetch("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -70,6 +71,7 @@ export function InvoiceExport({
         numbering: { ...latest.numbering, [kind]: { ...current, nextNumber: current.nextNumber + 1 } },
       }),
     });
+    if (!response.ok) throw new Error(`Numbering update failed (${response.status}).`);
   }
 
   async function buildDocument(autoPrint = false): Promise<string | null> {
@@ -171,30 +173,42 @@ export function InvoiceExport({
   }
 
   async function openPrintView() {
-    const html = await buildDocument(true);
-    if (!html) return;
-    if (!numberTouched) await bumpNumberingCounter();
-    // window.open with noopener returns null, so the document is served from a blob URL instead.
-    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
-    const popup = window.open(url, "_blank");
-    if (!popup) {
-      URL.revokeObjectURL(url);
-      return;
+    setPreviewError(false);
+    try {
+      const html = await buildDocument(true);
+      if (!html) throw new Error("No document template selected.");
+      if (!numberTouched) await bumpNumberingCounter();
+      // window.open with noopener returns null, so the document is served from a blob URL instead.
+      const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+      const popup = window.open(url, "_blank");
+      if (!popup) {
+        URL.revokeObjectURL(url);
+        throw new Error("Document popup was blocked.");
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setOpen(false);
+    } catch (error) {
+      console.error("Document print failed:", error);
+      setPreviewError(true);
     }
-    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
-    setOpen(false);
   }
 
   async function download() {
-    const html = await buildDocument();
-    if (!html) return;
-    if (!numberTouched) await bumpNumberingCounter();
-    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${number.replace(/[^a-z0-9_-]/gi, "_") || t(`${prefix}.documentTitle`)}.html`;
-    link.click();
-    URL.revokeObjectURL(url);
+    setPreviewError(false);
+    try {
+      const html = await buildDocument();
+      if (!html) throw new Error("No document template selected.");
+      if (!numberTouched) await bumpNumberingCounter();
+      const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${number.replace(/[^a-z0-9_-]/gi, "_") || t(`${prefix}.documentTitle`)}.html`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Document download failed:", error);
+      setPreviewError(true);
+    }
   }
 
   return (

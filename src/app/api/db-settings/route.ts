@@ -7,8 +7,11 @@ import {
   type SaveDbConfigInput,
 } from "@/lib/dbConfig";
 import { resetStoreCache, transferDatabaseData } from "@/lib/db";
+import { authorize } from "@/lib/auth/server";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await authorize(request, "database.manage");
+  if (denied) return denied;
   return NextResponse.json({ config: getDbConfigView() });
 }
 
@@ -47,6 +50,8 @@ async function testConnection(body: SaveDbConfigInput): Promise<void> {
 }
 
 export async function PUT(req: NextRequest) {
+  const denied = await authorize(req, "database.manage");
+  if (denied) return denied;
   const { transferData, ...body } = (await req.json()) as SaveDbConfigInput & { transferData?: boolean };
   let connectionString: string | undefined;
 

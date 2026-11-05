@@ -51,3 +51,19 @@ test("upload confirmation labels are translated in both built-in languages", () 
   }
   assert.equal(createLanguagePackTemplate()["upload.submit"], "Upload file");
 });
+
+test("statistics labels are translated in both built-in languages", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "nav.statistics",
+      "stats.title",
+      "stats.income",
+      "stats.printTime",
+      "stats.material",
+      "stats.materialBreakdown",
+      "stats.note",
+    ]) {
+      assert.notEqual(translate(language, key), key);
+    }
+  }
+});

@@ -1,6 +1,6 @@
 import { Pool } from "pg";
-import type { AppSettings, ParsedPrint, PrintCostInputs } from "../types";
-import { defaultSettings, migrateSettings, printModelKey, type DataStore } from "./shared";
+import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { defaultSettings, migrateSettings, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 async function ensureSchema(pool: Pool): Promise<void> {
   await pool.query(`
@@ -22,6 +22,21 @@ async function ensureSchema(pool: Pool): Promise<void> {
     CREATE TABLE IF NOT EXISTS print_models (
       id TEXT PRIMARY KEY,
       data BYTEA NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY,
+      updated_at TEXT NOT NULL,
+      data TEXT NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      print_id TEXT NOT NULL REFERENCES prints(id) ON DELETE RESTRICT,
+      quantity INTEGER NOT NULL,
+      PRIMARY KEY (order_id, print_id)
     )
   `);
 }
@@ -118,7 +133,14 @@ export function createPostgresStore(connectionString?: string): DataStore {
 
   async function deletePrint(id: string): Promise<void> {
     await ready;
-    await pool.query("DELETE FROM prints WHERE id = $1", [id]);
+    try {
+      await pool.query("DELETE FROM prints WHERE id = $1", [id]);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "23503") {
+        throw new PrintLinkedToOrderError("Drucke, die einem Auftrag zugeordnet sind, können nicht gelöscht werden.");
+      }
+      throw error;
+    }
     await pool.query("DELETE FROM print_models WHERE id = $1 OR id LIKE $2", [id, `${id}:%`]);
   }
 
@@ -150,6 +172,84 @@ export function createPostgresStore(connectionString?: string): DataStore {
     ]);
   }
 
+  async function listOrders(): Promise<PrintOrder[]> {
+    await ready;
+    const { rows } = await pool.query<{ data: string }>("SELECT data FROM orders ORDER BY updated_at DESC");
+    return rows.map((row) => JSON.parse(row.data) as PrintOrder);
+  }
+
+  async function saveOrder(order: PrintOrder): Promise<void> {
+    await ready;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO orders (id, updated_at, data) VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at, data = EXCLUDED.data`,
+        [order.id, order.updatedAt, JSON.stringify(order)]
+      );
+      await client.query("DELETE FROM order_items WHERE order_id = $1", [order.id]);
+      for (const item of order.items) {
+        await client.query("INSERT INTO order_items (order_id, print_id, quantity) VALUES ($1, $2, $3)", [
+          order.id, item.printId, item.quantity,
+        ]);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function deleteOrder(id: string): Promise<void> {
+    await ready;
+    await pool.query("DELETE FROM orders WHERE id = $1", [id]);
+  }
+
+  async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
+    await ready;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM print_models");
+      await client.query("DELETE FROM order_items");
+      await client.query("DELETE FROM prints");
+      await client.query("DELETE FROM orders");
+      await client.query("DELETE FROM settings");
+      await client.query("INSERT INTO settings (id, data) VALUES (1, $1)", [JSON.stringify(data.settings)]);
+      for (const entry of data.prints) {
+        await client.query(
+          "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES ($1, $2, $3, $4, $5)",
+          [entry.print.id, entry.print.fileName, entry.print.createdAt, JSON.stringify(entry.print),
+            entry.costInputs ? JSON.stringify(entry.costInputs) : null]
+        );
+        for (const model of entry.models) {
+          await client.query("INSERT INTO print_models (id, data) VALUES ($1, $2)", [
+            printModelKey(entry.print.id, model.plateIndex ?? undefined), model.model,
+          ]);
+        }
+      }
+      for (const order of data.orders) {
+        await client.query("INSERT INTO orders (id, updated_at, data) VALUES ($1, $2, $3)", [
+          order.id, order.updatedAt, JSON.stringify(order),
+        ]);
+        for (const item of order.items) {
+          await client.query("INSERT INTO order_items (order_id, print_id, quantity) VALUES ($1, $2, $3)", [
+            order.id, item.printId, item.quantity,
+          ]);
+        }
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   return {
     getSettings,
     saveSettings,
@@ -164,5 +264,9 @@ export function createPostgresStore(connectionString?: string): DataStore {
     deletePrint,
     getPrintCostInputs,
     savePrintCostInputs,
+    listOrders,
+    saveOrder,
+    deleteOrder,
+    replaceApplicationData,
   };
 }

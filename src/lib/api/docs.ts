@@ -8,6 +8,8 @@ import { bearerKey, createDocsSession, docsCookie, validDocsSession } from "./au
 import { ApiError, json } from "./http";
 import type { Operation } from "./operations";
 import { createOpenApi } from "./openapi";
+import { authEnabled, checkOrigin, cookieToken, requestIdentity } from "../auth/server";
+import { getAuthStore } from "../auth/store";
 
 const assets: Record<string, { type: string }> = {
   "swagger-ui.css": { type: "text/css; charset=utf-8" },
@@ -112,7 +114,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-appl
 
 function html(request: Request, authenticated: boolean): Response {
   const lang = request.headers.get("accept-language")?.toLowerCase().startsWith("de") ? "de" : "en";
-  const t = (key: string) => escapeHtml(translate(lang, key));
+  const t = (key: string) => escapeHtml(translate(lang, key === "api.docs.loginHelp" && authEnabled() ? "auth.apiDocsHelp" : key));
   const nonce = randomBytes(18).toString("base64");
   const content = authenticated
     ? `<header class="docs-header"><div class="docs-header-inner"><div class="docs-heading"><span class="docs-eyebrow">${t("api.docs.eyebrow")}</span><h1 class="docs-title">${t("api.docs.title")}</h1><p class="docs-description">${t("api.docs.subtitle")}</p></div><nav class="docs-actions" aria-label="${t("api.docs.actions")}"><a class="docs-button" href="/api/v1/docs/openapi.json">OpenAPI JSON</a><button class="docs-button" id="logout">${t("api.docs.logout")}</button></nav></div></header><div class="docs-shell"><p class="docs-notice">${t("api.docs.authorizeHelp")}</p><div id="swagger-ui"></div></div>
@@ -169,20 +171,37 @@ ${authenticated ? '<link rel="stylesheet" href="/api/v1/docs/swagger-ui.css">' :
 export async function handleDocs(request: Request, parts: string[], keys: string[], operations: Operation[]): Promise<Response> {
   if (new URL(request.url).searchParams.size) throw new ApiError(400, "validation_error", "Do not pass API keys or other parameters in documentation URLs.");
   const resource = parts.slice(1).join("/");
-  const key = bearerKey(request, keys);
-  const session = validDocsSession(request, keys);
-  const authenticated = Boolean(key || session);
+  const enabled = authEnabled();
+  const key = enabled ? null : bearerKey(request, keys);
+  const user = enabled && request.headers.has("authorization") ? await requestIdentity(request, true) : null;
+  const store = enabled ? getAuthStore() : null;
+  if (store) await store.initialize();
+  const docsToken = cookieToken(request, "pcc-user-api-docs");
+  const docsUser = store?.session(docsToken, Date.now(), "docs");
+  const session = enabled
+    ? Boolean(docsUser && !docsUser.mustChangePassword && !docsUser.mustChangeUsername && docsUser.permissions.includes("api.use"))
+    : validDocsSession(request, keys);
+  const authenticated = Boolean(key || user || session);
   if (resource === "" && request.method === "POST") {
-    if (!key) throw new ApiError(401, "unauthorized", "A valid API key is required.");
+    if (!key && !user) throw new ApiError(401, "unauthorized", "A valid API key is required.");
+    if (enabled) checkOrigin(request);
     const response = json({ ok: true });
-    response.headers.set("Set-Cookie", docsCookie(request, createDocsSession(key)));
+    response.headers.set("Set-Cookie", enabled && store && user
+      ? userDocsCookie(request, store.newSession(user.id, "docs"))
+      : docsCookie(request, createDocsSession(key!)));
     return response;
   }
   if (resource === "logout" && request.method === "POST") {
     if (!authenticated) throw new ApiError(401, "unauthorized", "A valid documentation session or API key is required.");
     const response = json({ ok: true });
-    response.headers.set("Set-Cookie", docsCookie(request, "", 0));
+    if (enabled) { checkOrigin(request); store?.logout(docsToken); }
+    response.headers.set("Set-Cookie", enabled ? userDocsCookie(request, "", 0) : docsCookie(request, "", 0));
     return response;
+  }
+
+  function userDocsCookie(request: Request, token: string, maxAge = 3600): string {
+    const secure = new URL(request.url).protocol === "https:" || process.env.AUTH_COOKIE_SECURE === "true" ? "; Secure" : "";
+    return `pcc-user-api-docs=${token}; Path=/api/v1/docs; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
   }
   if (request.method !== "GET" && request.method !== "HEAD") {
     throw new ApiError(405, "method_not_allowed", "Method not allowed.");

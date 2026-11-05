@@ -1,4 +1,4 @@
-import type { AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, ParsedPrint, PrintCostInputs } from "../types";
+import type { AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { randomUUID } from "../clientId";
 import { isCurrencyCode } from "../currency";
 
@@ -17,6 +17,31 @@ export interface DataStore {
   deletePrint(id: string): Promise<void>;
   getPrintCostInputs(id: string): Promise<PrintCostInputs | null>;
   savePrintCostInputs(id: string, inputs: PrintCostInputs): Promise<void>;
+  listOrders(): Promise<PrintOrder[]>;
+  saveOrder(order: PrintOrder): Promise<void>;
+  deleteOrder(id: string): Promise<void>;
+  replaceApplicationData(data: ApplicationDataSnapshot): Promise<void>;
+}
+
+const printLinkedToOrderErrorBrand = Symbol.for("3dpcc.print-linked-to-order-error");
+
+export class PrintLinkedToOrderError extends Error {
+  readonly [printLinkedToOrderErrorBrand] = true;
+}
+
+export function isPrintLinkedToOrderError(error: unknown): error is PrintLinkedToOrderError {
+  return typeof error === "object" && error !== null &&
+    (error as Record<symbol, unknown>)[printLinkedToOrderErrorBrand] === true;
+}
+
+export interface ApplicationDataSnapshot {
+  settings: AppSettings;
+  prints: {
+    print: ParsedPrint;
+    costInputs: PrintCostInputs | null;
+    models: { plateIndex: number | null; model: Buffer }[];
+  }[];
+  orders: PrintOrder[];
 }
 
 export function printModelKey(id: string, plateIndex?: number): string {

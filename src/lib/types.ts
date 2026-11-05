@@ -2,6 +2,7 @@
 
 import type { Currency } from "./currency";
 import type { ExternalSpool } from "./externalFilaments";
+import type { OrderCalculationSnapshot } from "./orderCalculation";
 
 export type PartCategory = "model" | "support" | "tower" | "other";
 
@@ -82,6 +83,23 @@ export interface ParsedPrint {
   plates?: ParsedPlate[];
   /** Reuses the source archive preview for prints created from an individual plate. */
   previewSource?: { printId: string; plateIndex: number };
+}
+
+export type OrderStatus = "open" | "in_progress" | "ready" | "completed" | "cancelled";
+export type OrderPriority = "low" | "normal" | "high";
+
+export interface PrintOrder {
+  id: string;
+  customerName: string;
+  status: OrderStatus;
+  priority?: OrderPriority;
+  gcodeAttachment?: { fileName: string; size: number };
+  calculation?: OrderCalculationSnapshot;
+  dueDate: string | null;
+  notes: string;
+  items: { printId: string; quantity: number }[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Material {

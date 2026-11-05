@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPrint, getPrintModel, getSettings } from "@/lib/db";
 import { getPreviewQueue } from "@/lib/previewQueue";
+import { authorize } from "@/lib/auth/server";
 
 function modelResponse(model: Buffer): NextResponse {
   return new NextResponse(new Uint8Array(model), {
@@ -16,6 +17,8 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await authorize(req, "prints.read");
+  if (denied) return denied;
   const settings = await getSettings();
   if (!settings.general.enable3dPreview) {
     return NextResponse.json({ error: "Die 3D-Vorschau ist in den Einstellungen deaktiviert." }, { status: 403 });
@@ -64,6 +67,8 @@ export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await authorize(_req, "prints.write");
+  if (denied) return denied;
   const settings = await getSettings();
   if (!settings.general.enable3dPreview) {
     return NextResponse.json({ error: "Die 3D-Vorschau ist deaktiviert." }, { status: 403 });

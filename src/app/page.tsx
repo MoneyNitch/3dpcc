@@ -4,10 +4,13 @@ import { translate } from "@/lib/i18n";
 import { UploadForm } from "@/components/UploadForm";
 import { ManualPrintForm } from "@/components/ManualPrintForm";
 import { PrintCard } from "@/components/PrintCard";
+import { authEnabled, requirePage } from "@/lib/auth/server";
+import { hasPermission } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const user = await requirePage("prints.read");
   const settings = await getSettings();
   requireSetupComplete(settings);
   const lang = settings.general.language;
@@ -24,8 +27,10 @@ export default async function HomePage() {
         </p>
       </div>
 
-      <UploadForm />
-      <ManualPrintForm materials={settings.materials} />
+      {hasPermission(user, "prints.write", authEnabled()) && <>
+        <UploadForm />
+        <ManualPrintForm materials={settings.materials} />
+      </>}
 
       {prints.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-400 dark:border-slate-700 dark:text-slate-500">

@@ -70,6 +70,22 @@ export function saveFilamentConnection(provider: FilamentProvider, connection: F
   fs.renameSync(configPath + ".tmp", configPath);
 }
 
+export function replaceFilamentConnections(connections: Record<FilamentProvider, FilamentConnection>): void {
+  const config: StoredFilamentConfig = {
+    spoolman: {
+      url: connections.spoolman.url,
+      apiKeyEncrypted: connections.spoolman.apiKey ? encryptSecret(connections.spoolman.apiKey) : null,
+    },
+    filaman: {
+      url: connections.filaman.url,
+      apiKeyEncrypted: connections.filaman.apiKey ? encryptSecret(connections.filaman.apiKey) : null,
+    },
+  };
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath + ".tmp", JSON.stringify(config, null, 2), { mode: 0o600 });
+  fs.renameSync(configPath + ".tmp", configPath);
+}
+
 export const filamentConnectionInput = z.object({
   provider: z.enum(FILAMENT_PROVIDERS),
   url: z.string().max(2048),

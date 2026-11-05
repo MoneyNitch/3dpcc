@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useLocale } from "@/lib/locale";
 import type { PreviewQueueEntry } from "@/lib/types";
+import { usePermission } from "@/lib/auth/context";
 
 interface QueueView {
   paused: boolean;
@@ -12,6 +13,7 @@ interface QueueView {
 
 export function PreviewQueueSettings() {
   const { t } = useLocale();
+  const canEdit = usePermission("prints.write");
   const [view, setView] = useState<QueueView | null>(null);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -85,7 +87,7 @@ export function PreviewQueueSettings() {
                   {job.status === "queued" ? `${index + 1}. ` : ""}{t(job.status === "error" ? "queue.errorStatus" : `queue.${job.status}`)}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              {canEdit && <div className="flex flex-wrap gap-2">
                 {job.status === "queued" && <>
                   <button type="button" disabled={busy || index === 0} onClick={() => void change(job.id, "up")} aria-label={`${t("queue.up")}: ${job.name}`} className={buttonClass}>{t("queue.up")}</button>
                   <button type="button" disabled={busy || index === waiting.length - 1} onClick={() => void change(job.id, "down")} aria-label={`${t("queue.down")}: ${job.name}`} className={buttonClass}>{t("queue.down")}</button>
@@ -93,7 +95,7 @@ export function PreviewQueueSettings() {
                 <button type="button" disabled={busy} onClick={() => void change(job.id)} aria-label={`${t(job.status === "running" ? "queue.cancel" : "queue.remove")}: ${job.name}`} className={`${buttonClass} text-red-600 dark:text-red-400`}>
                   {t(job.status === "running" ? "queue.cancel" : "queue.remove")}
                 </button>
-              </div>
+              </div>}
             </li>
           );
         })}

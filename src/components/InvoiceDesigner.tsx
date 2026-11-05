@@ -719,21 +719,45 @@ function VariablesInfo({
   const { t } = useLocale();
   const names = [...INVOICE_VARIABLES, ...customKeys];
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function dismissOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !containerRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    function dismissOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [open]);
 
   return (
-    <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <div ref={containerRef} className="relative">
       <button
         type="button"
+        onClick={() => setOpen((current) => !current)}
         className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-sm font-semibold text-slate-500 hover:border-orange-400 hover:text-orange-600 dark:border-slate-600 dark:text-slate-400 dark:hover:text-orange-400"
         aria-label={t("invoice.variables")}
+        aria-expanded={open}
+        aria-controls="invoice-variables-popover"
       >
         i
       </button>
       {open && (
-        <div className="absolute right-0 z-20 mt-1 w-72 rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+        <div id="invoice-variables-popover" role="dialog" aria-label={t("invoice.variables")} className="absolute right-0 z-20 mt-1 w-72 rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-lg dark:border-slate-700 dark:bg-slate-900">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("invoice.variables")}</h3>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("invoice.variablesHint")}</p>
-          {/* overscroll-contain stops scroll chaining, which would otherwise scroll the page under the cursor and close this popover. */}
           <div className="mt-3 flex max-h-80 flex-col gap-1 overflow-y-auto overscroll-contain">
             {names.map((name) => (
               <button

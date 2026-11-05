@@ -11,7 +11,7 @@ function schemaJson(schema: z.ZodType, io: "input" | "output" = "output") {
 export function createOpenApi(operations: Operation[]) {
   const paths: Record<string, Record<string, unknown>> = {};
   const errors: Record<number, string> = {
-    400: "Invalid input or JSON", 401: "Missing or invalid API key", 403: "Feature disabled in settings",
+    400: "Invalid input or JSON", 401: "Missing or invalid API key", 403: "Role does not permit operation or feature disabled in settings",
     404: "Resource not found", 409: "Operation conflicts with current state",
     413: "Request body too large", 415: "Unsupported content type", 422: "Invalid 3MF archive",
     500: "Internal server error", 503: "API keys not configured or invalid server configuration",
@@ -56,14 +56,14 @@ export function createOpenApi(operations: Operation[]) {
     openapi: "3.1.0",
     info: {
       title: "3D-PCC API", version: "1.0.0",
-      description: "Versioned local REST API. Configure API_KEYS on the server and send Authorization: Bearer <key>. Keys have full access. Documentation sessions do not authorize API operations. Internal UI endpoints remain separate and unauthenticated: use only on a trusted private network.",
+      description: "Versioned local REST API. With login enabled (default), create user-bound keys in User management; every request checks the user's role. Send Authorization: Bearer <key>. Documentation sessions cannot authorize API operations or browser login. With AUTH_ENABLED=false, legacy environment API_KEYS have full API access and the browser UI/internal endpoints are unprotected. Use HTTPS on untrusted networks.",
     },
     servers: [{ url: "/api/v1", description: "Same-origin 3D-PCC instance" }],
     security: [{ ApiKey: [] }],
     tags: ["Prints", "Costs", "Settings", "Documents"].map((name) => ({ name })),
     paths,
     components: {
-      securitySchemes: { ApiKey: { type: "http", scheme: "bearer", description: "One server-side API_KEYS value (without the Bearer prefix)." } },
+      securitySchemes: { ApiKey: { type: "http", scheme: "bearer", description: "A user-bound API key, or an environment API_KEYS value when AUTH_ENABLED=false (without the Bearer prefix)." } },
       schemas: { ApiError: schemaJson(errorSchema) },
     },
   };

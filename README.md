@@ -50,7 +50,28 @@ tower and total) and multi-color information, and calculates print costs.
 - Order management at **Orders** stores a customer, status, due date, notes,
   and saved prints with quantities. Prints linked to an order cannot be deleted
   until the order is changed or removed.
-- Read-only Spoolman and FilaMan System connections with per-filament spool
+  Search customers and combine status, priority and due-date filters with sorting.
+  Completed orders are hidden by default; select **All** or **Completed** in the
+  status filter to show them. Due dates use the browser's local calendar day:
+  active orders due before today are highlighted in red with an **Overdue** badge
+  (completed and cancelled orders are never marked overdue). Due-date filters offer
+  overdue, today, future and undated orders. Resetting filters restores the default
+  view without changing the selected sort order.
+- Open an order to view its details, G-code attachment and independent calculation.
+  Edit per-unit material, accessory, electricity and machine costs for each position;
+  position quantities come from the order. Labor, packaging and shipping are charged
+  once per order. Margin, an explicit order discount and tax apply to the total.
+  Per-print labor, packaging, margin, tax and quantity discounts are not added again.
+  **Save calculation** freezes the order's own prices, hourly rate and currency
+  without changing print calculations or inventory. Later price changes do not
+  affect saved orders. **Apply current print costs and save** requires confirmation
+  and replaces custom position prices with current print costs and order quantities.
+  Changing order positions flags the old snapshot until explicitly recalculated.
+  Currency changes are not automatically converted. Snapshots are included in backups;
+  completed-order statistics use them, with the original calculation fallback for
+  older orders without a snapshot. Statistics show different currencies separately
+  rather than adding or converting their values.
+- Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
 - Interactive 3D preview: embedded model meshes when available, otherwise a
   complete G-code toolpath preview (including XY arcs), rendered using WebGL2
@@ -173,7 +194,19 @@ and invoice calculations do not require a live connection and do not silently
 change when an external price changes. Load the inventory and choose **Use current
 spool price** to explicitly update a selection. A manual price override remains
 possible. Local materials and their prices are not imported or modified.
-**No filament consumption or stock changes are sent to either service.**
+Selecting a spool or saving costs never changes inventory. Use **Deduct consumption**
+in the calculator to book actual usage, and explicitly confirm the displayed
+grams before submitting. Consumption includes the selected plate(s) multiplied by
+quantity and is grouped per spool. The current external stock is checked first;
+unknown or insufficient stock is rejected. FilaMan requires the additional
+`spool_events:create_consumption` permission. Spoolman uses
+`PUT /api/v1/spool/{id}/use`; FilaMan uses
+`POST /api/v1/spools/{id}/consumptions`.
+
+There are no automatic retries. If a request times out or its result is uncertain,
+check the external inventory before trying again: the booking may already have
+succeeded. This is an explicit consumption booking, not an automatic print tracker;
+booking again after reloading the page deducts material again.
 
 The integration uses Spoolman's `/api/v1/spool` list and FilaMan System's
 paginated `/api/v1/spools` API. Results are limited to 10,000 spools per service,

@@ -30,6 +30,8 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
     import * as backup from ${moduleUrl("../../app/api/backup/route.ts")};
     import * as orders from ${moduleUrl("../../app/api/orders/route.ts")};
     import * as order from ${moduleUrl("../../app/api/orders/[id]/route.ts")};
+    import * as orderGcode from ${moduleUrl("../../app/api/orders/[id]/gcode/route.ts")};
+    import * as orderCalculation from ${moduleUrl("../../app/api/orders/[id]/calculate/route.ts")};
     import * as v1 from ${moduleUrl("../../app/api/v1/[[...path]]/route.ts")};
     import { getAuthStore } from ${moduleUrl("./store.ts")};
     const password = "a-long-test-password";
@@ -48,7 +50,8 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
       return response;
     }
     const reads = [prints.GET, (r) => print.GET(r, ctx), (r) => model.GET(r, ctx), (r) => download.GET(r, ctx),
-      settings.GET, database.GET, spools.GET, queue.GET, support.GET, orders.GET, users.GET];
+      settings.GET, database.GET, spools.GET, queue.GET, support.GET, orders.GET,
+      (r) => orderGcode.GET(r, ctx), (r) => orderCalculation.GET(r, ctx), users.GET];
     for (const handler of reads) assert.equal((await handler(request())).status, 401);
     const writes = [
       ["POST", prints.POST], ["DELETE", (r) => print.DELETE(r, ctx)], ["PUT", (r) => print.PUT(r, ctx)],
@@ -56,8 +59,11 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
       ["POST", (r) => plates.POST(r, ctx)], ["PATCH", (r) => plates.PATCH(r, ctx)],
       ["PUT", settings.PUT], ["PUT", database.PUT], ["PUT", integrations.PUT],
       ["PATCH", queue.PATCH], ["DELETE", queue.DELETE], ["POST", support.POST], ["POST", users.POST],
+      ["POST", spools.POST],
+      ["PUT", (r) => orderCalculation.PUT(r, ctx)],
       ["POST", backup.POST], ["PUT", backup.PUT], ["POST", orders.POST],
-      ["PUT", (r) => order.PUT(r, ctx)], ["DELETE", (r) => order.DELETE(r, ctx)],
+      ["PATCH", (r) => order.PATCH(r, ctx)], ["PUT", (r) => order.PUT(r, ctx)], ["DELETE", (r) => order.DELETE(r, ctx)],
+      ["POST", (r) => orderGcode.POST(r, ctx)], ["DELETE", (r) => orderGcode.DELETE(r, ctx)],
     ];
     for (const [method, handler] of writes) assert.equal((await handler(request(method, {}))).status, 401);
     const initial = await login("admin", "admin");

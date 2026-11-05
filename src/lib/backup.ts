@@ -24,13 +24,14 @@ import { getPreviewQueue } from "./previewQueue";
 import { normalizeFilamentServiceUrl, type FilamentConnection } from "./externalFilaments";
 import type { ApplicationDataSnapshot } from "./db/shared";
 import type { PrintOrder } from "./types";
+import { orderCalculationSnapshotSchema } from "./orderCalculation";
 
 const magic = Buffer.from("3DPCCBACKUP1", "ascii");
 export const maximumBackupBytes = 512 * 1024 * 1024;
 const maximumEntries = 50_000;
 const maximumUncompressedBytes = 512 * 1024 * 1024;
 const dataDirectory = path.join(process.cwd(), "data");
-const directoryTargets = ["original-archives", "preview-jobs"] as const;
+const directoryTargets = ["original-archives", "order-gcode", "preview-jobs"] as const;
 
 export class BackupError extends Error {}
 
@@ -155,6 +156,11 @@ function safeArchivePath(name: string): boolean {
 }
 
 function isAllowedLocalPath(name: string): boolean {
+  const orderGcodePrefix = "local/order-gcode/";
+  if (name.startsWith(orderGcodePrefix)) {
+    return /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.gcode$/i
+      .test(name.slice(orderGcodePrefix.length));
+  }
   const originalPrefix = "local/original-archives/";
   if (name.startsWith(originalPrefix)) {
     return /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.3mf$/i
@@ -244,6 +250,11 @@ function parseBackupData(zip: AdmZip): BackupData {
 
   const orderSchema = orderInputSchema.extend({
     id: z.uuid(),
+    calculation: orderCalculationSnapshotSchema.optional(),
+    gcodeAttachment: z.strictObject({
+      fileName: z.string().min(1).max(255),
+      size: z.number().int().positive().max(50 * 1024 * 1024),
+    }).optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   });

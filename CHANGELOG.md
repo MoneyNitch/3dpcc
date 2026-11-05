@@ -1,21 +1,82 @@
 # Changelog
 
-## Unreleased
+## v0.8.0 — User management, customer orders and independent order pricing
 
 ### Added
-- Order management for customer orders with status, due date, notes, linked
-  saved prints and per-print quantities. Prints linked to an order cannot be
-  deleted until they are unlinked.
-- Password-protected full application backups and restore under Settings →
-  Database, including settings, print data, users, external filament settings,
-  retained originals and preview queue files. Database connection settings are
-  preserved on the current installation during restore.
-- API key regeneration in User management, replacing a lost key immediately
-  while retaining its name and user and displaying the replacement only once.
-- Configurable password requirements in User management: minimum length from
+- **Application login and user management** with Viewer, Admin, Superadmin
+  and custom roles. Permissions control pages, internal endpoints and
+  user-bound API keys.
+- **Remember me** for persistent login sessions lasting up to 30 days.
+- **API key management** per user, including regeneration of lost keys.
+  Regeneration immediately replaces the old key, retains its name and user,
+  and displays the replacement only once.
+- **Configurable password requirements** in User management: minimum length from
   4 to 128 characters and optional uppercase, lowercase, digit and special
   character requirements. Rules apply to new, reset and changed passwords;
   existing passwords remain valid.
+- **Customer order management** with status, priority, due date, notes, linked
+  saved prints and per-print quantities. Change status and priority directly
+  in the overview without opening the edit form.
+- **Order search, filters and sorting**: search customer names and combine
+  status, priority and due-date filters. Sort by priority, due date, customer,
+  status or creation date in either direction; high priority comes first by
+  default. Due-date filters include overdue, today, future and undated orders.
+- **Dedicated order detail pages** with customer information, quick status and
+  priority controls, print positions and an independent cost calculation.
+- **Saved order pricing snapshots** with editable per-unit material, accessory,
+  electricity and machine costs. Labor, packaging and shipping apply once per
+  order; margin, order discount and tax apply to the total. Saved prices,
+  currency and hourly rate remain independent of later print or settings changes.
+- **Optional G-code attachments** for orders (`.gcode`, `.gco`, `.gc`, up to
+  50 MiB), with download, replacement and removal. Attachments are stored
+  separately and are not parsed or added as calculated print positions.
+- **Confirmed external spool consumption** for Spoolman and FilaMan System.
+  Deduct calculated grams for the selected plates and quantity only after
+  confirmation; selections using the same spool are grouped together.
+- **Statistics page** showing saved print count, print time, material usage
+  by type and the calculated value of completed orders.
+- **Password-protected full application backups and restore** under Settings →
+  Database, including settings, print data and cost inputs, users, external
+  filament settings, orders and pricing snapshots, G-code attachments, retained
+  originals and preview queue files.
+- German and English texts for the new workflows, plus tests for permissions,
+  persistence, backups, order pricing, filters and external stock consumption.
+
+### Changed
+- Completed orders are hidden from the order overview by default and can be
+  shown with the status filter. Overdue active orders have a red highlight and
+  an **Overdue** badge; completed and cancelled orders are never marked overdue.
+  Due-date comparisons use the browser's local calendar day.
+- Changes to order positions or quantities flag an existing pricing snapshot
+  as outdated. Applying current print costs requires confirmation and replaces
+  custom position prices while preserving the entered order-wide cost settings.
+- Numeric fields in order calculations display two decimal places without
+  reducing the precision of untouched calculation values.
+- Completed-order statistics use saved order prices where available, with the
+  previous live print-calculation fallback for orders without a snapshot.
+  Different currencies are displayed separately, not added or converted.
+- Prints linked to an order cannot be deleted until they are unlinked.
+- With login enabled, versioned API access uses user-bound keys and role
+  permissions. Local login-free operation remains available through
+  `AUTH_ENABLED=false`.
+
+### Notes
+- This release introduces application-wide authentication, superseding the
+  API-only authentication limitation documented for v0.7.0. Continue using
+  3D-PCC on a trusted private network.
+- Order calculations do not modify saved print calculations or automatically
+  deduct inventory. Refreshing a saved order in a different currency is blocked;
+  no automatic currency conversion is performed.
+- External stock is never changed merely by selecting a spool or saving costs.
+  Consumption requires sufficient known stock and an explicit confirmation.
+  Uncertain provider outcomes are reported without automatic retries; check the
+  external inventory before attempting another booking. A persistent consumption
+  journal is not included in this release.
+- G-code attachments remain optional; creating an order still requires a customer
+  name and at least one saved print position.
+- Restore replaces application records, local backup-managed files and users,
+  and invalidates active sessions. Database connection settings and environment
+  variables of the current installation are preserved.
 
 ## v0.7.0 — REST API, multi-plate projects and document previews
 

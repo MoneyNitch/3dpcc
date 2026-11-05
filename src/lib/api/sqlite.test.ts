@@ -21,10 +21,44 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     import { originalArchives } from ${JSON.stringify(new URL("../originalArchives.ts", import.meta.url).href)};
     import { deletePrint } from ${JSON.stringify(new URL("../db/index.ts", import.meta.url).href)};
     import { POST as createOrder } from ${JSON.stringify(new URL("../../app/api/orders/route.ts", import.meta.url).href)};
-    import { PUT as updateOrder, DELETE as deleteOrder } from ${JSON.stringify(new URL("../../app/api/orders/[id]/route.ts", import.meta.url).href)};
+    import { PATCH as updateOrderStatus, PUT as updateOrder, DELETE as deleteOrder } from ${JSON.stringify(new URL("../../app/api/orders/[id]/route.ts", import.meta.url).href)};
+    import { POST as uploadOrderGcode, GET as downloadOrderGcode, DELETE as deleteOrderGcode } from ${JSON.stringify(new URL("../../app/api/orders/[id]/gcode/route.ts", import.meta.url).href)};
+    import { GET as calculateOrder, PUT as saveCalculation } from ${JSON.stringify(new URL("../../app/api/orders/[id]/calculate/route.ts", import.meta.url).href)};
+    import { createOrderCalculation, calculateOrderSnapshot } from ${JSON.stringify(new URL("../orderCalculation.ts", import.meta.url).href)};
+    import { orderGcodeFiles } from ${JSON.stringify(new URL("../orderGcode.ts", import.meta.url).href)};
+    import { POST as consumeSpool } from ${JSON.stringify(new URL("../../app/api/filament-spools/route.ts", import.meta.url).href)};
+    import { saveFilamentConnection } from ${JSON.stringify(new URL("../filamentConfig.ts", import.meta.url).href)};
     import { DELETE as deletePrintRoute } from ${JSON.stringify(new URL("../../app/api/prints/[id]/route.ts", import.meta.url).href)};
     import AdmZip from ${JSON.stringify(pathToFileURL(requireModule.resolve("adm-zip")).href)};
     const store = createSqliteStore();
+    saveFilamentConnection("spoolman", { url: "http://localhost:7912", apiKey: "" });
+    const originalFetch = globalThis.fetch;
+    let stockWrites = 0;
+    globalThis.fetch = async (_url, options) => {
+      if (options?.method === "PUT") {
+        stockWrites++;
+        assert.deepEqual(JSON.parse(options.body), { use_weight: 25 });
+        return Response.json({});
+      }
+      return Response.json([{
+        id: 1, remaining_weight: 100,
+        filament: { name: "Test", material: "PLA" },
+      }]);
+    };
+    try {
+      const consumption = { provider: "spoolman", sourceUrl: "http://localhost:7912", id: 1, grams: 25, confirmed: true };
+      const consume = (body) => consumeSpool(new Request("http://localhost/api/filament-spools", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }));
+      assert.equal((await consume({ ...consumption, confirmed: false })).status, 400);
+      assert.equal((await consume({ ...consumption, sourceUrl: "http://different-server" })).status, 409);
+      assert.equal((await consume({ ...consumption, grams: 101 })).status, 409);
+      assert.equal(stockWrites, 0);
+      assert.equal((await consume(consumption)).status, 200);
+      assert.equal(stockWrites, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
     const unexpected = async () => { throw new Error("Unexpected preview operation"); };
     const operations = createOperations({
       store, upload: unexpected, splitPlates: unexpected, model: unexpected,
@@ -65,6 +99,102 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     assert.equal(createdOrder.status, 201);
     const { order } = await createdOrder.json();
     assert.equal((await reopened.listOrders())[0].customerName, "Persistent customer");
+    assert.equal((await reopened.listOrders())[0].priority, "normal");
+    const gcodeBytes = Buffer.from("; generated G-code\\nG28\\n");
+    const uploadGcode = () => uploadOrderGcode(new Request("http://localhost/api/orders/" + order.id + "/gcode", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent("Kundenauftrag.gcode") },
+      body: gcodeBytes,
+    }), { params: Promise.resolve({ id: order.id }) });
+    const attached = await uploadGcode();
+    assert.equal(attached.status, 200);
+    assert.equal((await reopened.listOrders())[0].gcodeAttachment.fileName, "Kundenauftrag.gcode");
+    assert.equal((await reopened.listOrders())[0].gcodeAttachment.size, gcodeBytes.length);
+    const downloadedGcode = await downloadOrderGcode(new Request("http://localhost/api/orders/" + order.id + "/gcode"), {
+      params: Promise.resolve({ id: order.id }),
+    });
+    assert.equal(downloadedGcode.status, 200);
+    assert.deepEqual(Buffer.from(await downloadedGcode.arrayBuffer()), gcodeBytes);
+    const unsupportedGcode = await uploadOrderGcode(new Request("http://localhost/api/orders/" + order.id + "/gcode", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent("invalid.txt") },
+      body: gcodeBytes,
+    }), { params: Promise.resolve({ id: order.id }) });
+    assert.equal(unsupportedGcode.status, 400);
+    const removedGcode = await deleteOrderGcode(new Request("http://localhost/api/orders/" + order.id + "/gcode", {
+      method: "DELETE",
+    }), { params: Promise.resolve({ id: order.id }) });
+    assert.equal(removedGcode.status, 200);
+    assert.equal((await reopened.listOrders())[0].gcodeAttachment, undefined);
+    assert.equal(await orderGcodeFiles.read(order.id), null);
+    assert.equal((await uploadGcode()).status, 200);
+    const calculationResponse = await calculateOrder(new Request("http://localhost/api/orders/" + order.id + "/calculate"), {
+      params: Promise.resolve({ id: order.id }),
+    });
+    assert.equal(calculationResponse.status, 200);
+    const { calculation, snapshot: previewSnapshot } = await calculationResponse.json();
+    assert.equal((await reopened.listOrders())[0].calculation, undefined);
+    assert.equal(calculation.items.length, 1);
+    assert.equal(calculation.items[0].quantity, 2);
+    const savedSettings = await reopened.getSettings();
+    const savedCostInputs = await reopened.getPrintCostInputs(print.id);
+    const savedPrint = await reopened.getPrint(print.id);
+    assert.ok(savedPrint);
+    const expectedSnapshot = createOrderCalculation(order, [{ print: savedPrint, costInputs: savedCostInputs }],
+      savedSettings,
+    );
+    const expectedOrderPrice = calculateOrderSnapshot(expectedSnapshot).totals.totalPrice;
+    assert.equal(calculation.totals.totalPrice, expectedOrderPrice);
+    assert.equal((await reopened.getPrintCostInputs(print.id)).quantity, 4);
+    const calculationInputs = { ...previewSnapshot.inputs, shippingCost: 8, laborMinutes: 45 };
+    const itemCosts = previewSnapshot.items.map(({ printId, materialCost, extraCost, energyCost, machineCost }) => ({
+      printId, materialCost: materialCost + 1, extraCost, energyCost, machineCost,
+    }));
+    async function saveOrderCalculation(overrides = {}) {
+      const current = (await reopened.listOrders())[0];
+      return saveCalculation(new Request("http://localhost/api/orders/" + order.id + "/calculate", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedUpdatedAt: current.updatedAt, currency: previewSnapshot.currency, inputs: calculationInputs,
+          itemCosts, refresh: false, ...overrides,
+        }),
+      }), { params: Promise.resolve({ id: order.id }) });
+    }
+    assert.equal((await saveOrderCalculation({ inputs: { ...calculationInputs, shippingCost: -1 } })).status, 400);
+    assert.equal((await saveOrderCalculation({ expectedUpdatedAt: "2000-01-01T00:00:00.000Z" })).status, 409);
+    assert.equal((await saveOrderCalculation({ currency: "USD" })).status, 409);
+    assert.equal((await saveOrderCalculation({ itemCosts: [itemCosts[0], itemCosts[0]] })).status, 400);
+    assert.equal((await saveOrderCalculation()).status, 200);
+    let frozenSnapshot = (await reopened.listOrders())[0].calculation;
+    assert.equal(frozenSnapshot.inputs.shippingCost, 8);
+    assert.equal(frozenSnapshot.items[0].materialCost, itemCosts[0].materialCost);
+    const originalSettings = await reopened.getSettings();
+    await store.saveSettings({ ...originalSettings, general: { ...originalSettings.general, currency: "USD" } });
+    assert.equal((await saveOrderCalculation({ refresh: true })).status, 409);
+    assert.deepEqual((await reopened.listOrders())[0].calculation, frozenSnapshot);
+    assert.equal((await saveOrderCalculation()).status, 200);
+    assert.equal((await reopened.listOrders())[0].calculation.currency, frozenSnapshot.currency);
+    frozenSnapshot = (await reopened.listOrders())[0].calculation;
+    await store.saveSettings({
+      ...originalSettings,
+      costs: { ...originalSettings.costs, laborRatePerHour: originalSettings.costs.laborRatePerHour + 20 },
+      materials: originalSettings.materials.map((material) => ({ ...material, pricePerKg: 200 })),
+    });
+    await store.savePrintCostInputs(print.id, { ...savedCostInputs, materialPriceOverrides: { "1": 500 } });
+    const frozenResponse = await calculateOrder(new Request("http://localhost"), { params: Promise.resolve({ id: order.id }) });
+    const frozenRead = await frozenResponse.json();
+    assert.deepEqual(frozenRead.snapshot, frozenSnapshot);
+    assert.equal(frozenRead.calculation.totals.totalPrice, calculateOrderSnapshot(frozenSnapshot).totals.totalPrice);
+    assert.equal((await saveOrderCalculation()).status, 200);
+    assert.equal((await reopened.listOrders())[0].calculation.laborRatePerHour, frozenSnapshot.laborRatePerHour);
+    assert.equal((await saveOrderCalculation({ refresh: true })).status, 200);
+    const refreshedSnapshot = (await reopened.listOrders())[0].calculation;
+    assert.notEqual(refreshedSnapshot.items[0].materialCost, frozenSnapshot.items[0].materialCost);
+    assert.equal(refreshedSnapshot.laborRatePerHour, originalSettings.costs.laborRatePerHour + 20);
+    assert.equal(refreshedSnapshot.inputs.shippingCost, 8);
+    assert.equal((await reopened.getPrintCostInputs(print.id)).quantity, 4);
+    await store.saveSettings(originalSettings);
+    await store.savePrintCostInputs(print.id, savedCostInputs);
     await assert.rejects(reopened.deletePrint(print.id), /einem Auftrag zugeordnet/);
     assert.ok(await reopened.getPrint(print.id));
     const linkedDelete = await deletePrintRoute(new Request("http://localhost", { method: "DELETE" }), {
@@ -73,14 +203,42 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     assert.equal(linkedDelete.status, 409);
     const updatedOrder = await updateOrder(new Request("http://localhost/api/orders/" + order.id, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...orderBody, status: "in_progress" }),
+      body: JSON.stringify({ ...orderBody, items: [{ printId: print.id, quantity: 3 }], status: "in_progress" }),
     }), { params: Promise.resolve({ id: order.id }) });
     assert.equal(updatedOrder.status, 200);
     assert.equal((await reopened.listOrders())[0].status, "in_progress");
+    assert.deepEqual((await reopened.listOrders())[0].calculation, refreshedSnapshot);
+    const outdatedRead = await calculateOrder(new Request("http://localhost"), { params: Promise.resolve({ id: order.id }) });
+    assert.equal((await outdatedRead.json()).outdated, true);
+    assert.equal((await saveOrderCalculation()).status, 409);
+    assert.equal((await saveOrderCalculation({ refresh: true })).status, 200);
+    assert.equal((await reopened.listOrders())[0].calculation.items[0].quantity, 3);
+    const finalSnapshot = (await reopened.listOrders())[0].calculation;
+    const changedStatus = await updateOrderStatus(new Request("http://localhost/api/orders/" + order.id, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "ready" }),
+    }), { params: Promise.resolve({ id: order.id }) });
+    assert.equal(changedStatus.status, 200);
+    assert.equal((await reopened.listOrders())[0].status, "ready");
+    assert.deepEqual((await reopened.listOrders())[0].calculation, finalSnapshot);
+    assert.equal((await reopened.listOrders())[0].notes, "Test order");
+    const changedPriority = await updateOrderStatus(new Request("http://localhost/api/orders/" + order.id, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ priority: "high" }),
+    }), { params: Promise.resolve({ id: order.id }) });
+    assert.equal(changedPriority.status, 200);
+    assert.equal((await reopened.listOrders())[0].priority, "high");
+    assert.equal((await reopened.listOrders())[0].status, "ready");
+    const invalidStatus = await updateOrderStatus(new Request("http://localhost/api/orders/" + order.id, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "invalid" }),
+    }), { params: Promise.resolve({ id: order.id }) });
+    assert.equal(invalidStatus.status, 400);
     assert.equal((await deleteOrder(new Request("http://localhost", { method: "DELETE" }), {
       params: Promise.resolve({ id: order.id }),
     })).status, 200);
     assert.equal((await reopened.listOrders()).length, 0);
+    assert.equal(await orderGcodeFiles.read(order.id), null);
     assert.equal((await send("/prints/" + print.id, "DELETE")).status, 200);
     assert.equal(await reopened.getPrint(print.id), null);
     const zip = new AdmZip();

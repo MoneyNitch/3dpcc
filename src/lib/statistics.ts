@@ -1,5 +1,7 @@
 import { calculateAllPlatesCost, defaultCostInputs } from "./costCalculator";
 import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "./types";
+import { calculateOrderSnapshot } from "./orderCalculation";
+import type { Currency } from "./currency";
 
 export interface StatisticsPrint {
   print: ParsedPrint;
@@ -11,6 +13,7 @@ export interface PrintStatistics {
   printTimeSeconds: number;
   materialGrams: number;
   completedOrderValue: number;
+  completedOrderValues: { currency: Currency; value: number }[];
   materials: { type: string; grams: number }[];
 }
 
@@ -41,9 +44,15 @@ export function calculatePrintStatistics(
     }
   }
 
-  let completedOrderValue = 0;
+  const completedOrderValues = new Map<Currency, number>([[settings.general.currency, 0]]);
   for (const order of orders) {
     if (order.status !== "completed") continue;
+    if (order.calculation) {
+      const { currency } = order.calculation;
+      completedOrderValues.set(currency, (completedOrderValues.get(currency) ?? 0) +
+        calculateOrderSnapshot(order.calculation).totals.totalPrice);
+      continue;
+    }
     for (const item of order.items) {
       const saved = printsById.get(item.printId);
       if (!saved) {
@@ -55,7 +64,9 @@ export function calculatePrintStatistics(
         ...saved.costInputs,
         quantity: item.quantity,
       };
-      completedOrderValue += calculateAllPlatesCost(plates, settings, inputs).totalPrice;
+      const currency = settings.general.currency;
+      completedOrderValues.set(currency, (completedOrderValues.get(currency) ?? 0) +
+        calculateAllPlatesCost(plates, settings, inputs).totalPrice);
     }
   }
 
@@ -63,7 +74,8 @@ export function calculatePrintStatistics(
     printCount: prints.length,
     printTimeSeconds,
     materialGrams,
-    completedOrderValue,
+    completedOrderValue: completedOrderValues.get(settings.general.currency) ?? 0,
+    completedOrderValues: [...completedOrderValues].map(([currency, value]) => ({ currency, value })),
     materials: [...materials.values()].sort((a, b) => b.grams - a.grams),
   };
 }

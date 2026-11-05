@@ -4,10 +4,12 @@ import { createServer, type RequestListener } from "node:http";
 import { test } from "node:test";
 import {
   fetchExternalSpools,
+  consumeExternalSpool,
   externalSpoolKey,
   FilamentServiceError,
   normalizeFilamentServiceUrl,
   parseExternalSpools,
+  spoolConsumptionForFilaments,
 } from "./externalFilaments";
 
 function spoolmanSpool(id = 1) {
@@ -64,6 +66,20 @@ test("spool identities distinguish providers and servers with the same spool ID"
   assert.notEqual(externalSpoolKey({ ...spool, sourceUrl: "http://first" }),
     externalSpoolKey({ ...spool, sourceUrl: "http://second" }));
   assert.notEqual(externalSpoolKey(spool), externalSpoolKey({ ...spool, provider: "filaman" }));
+});
+
+test("groups selected filament consumption per spool and multiplies by print quantity", () => {
+  const [spool] = parseExternalSpools("spoolman", [spoolmanSpool()]);
+  const other = { ...spool, sourceUrl: "http://other-server" };
+  const consumption = spoolConsumptionForFilaments([
+    { filamentId: "1", usedGramsTotal: 10 },
+    { filamentId: "2", usedGramsTotal: 2.5 },
+    { filamentId: "3", usedGramsTotal: 100 },
+    { filamentId: "4", usedGramsTotal: 4 },
+  ], { "1": spool, "2": spool, "4": other }, 3);
+  assert.equal(consumption.size, 2);
+  assert.equal(consumption.get(externalSpoolKey(spool))?.grams, 37.5);
+  assert.equal(consumption.get(externalSpoolKey(other))?.grams, 12);
 });
 
 test("Spoolman uses purchase price and original net weight, not remaining weight", () => {
@@ -183,3 +199,40 @@ test("detects servers that repeat the same inventory page", async () => {
       (error: unknown) => error instanceof FilamentServiceError && error.code === "response");
   });
 });
+
+test("books consumption through each provider's native endpoint exactly once", async () => {
+    for (const provider of ["spoolman", "filaman"] as const) {
+      let requests = 0;
+      await withServer(async (request, response) => {
+        requests++;
+        assert.equal(request.method, provider === "spoolman" ? "PUT" : "POST");
+        assert.equal(request.url, provider === "spoolman" ? "/api/v1/spool/7/use" : "/api/v1/spools/7/consumptions");
+        assert.equal(request.headers.authorization, provider === "spoolman" ? "Bearer test-key" : "ApiKey test-key");
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        assert.equal(provider === "spoolman" ? body.use_weight : body.delta_weight_g, provider === "spoolman" ? 12.5 : -12.5);
+        response.end("{}");
+      }, async (url) => {
+        await consumeExternalSpool(provider, { url, apiKey: "test-key" }, 7, 12.5);
+        assert.equal(requests, 1);
+      });
+    }
+  });
+
+  test("rejects invalid consumption without requests and never retries rejected bookings", async () => {
+    let requests = 0;
+    await withServer((_request, response) => {
+      requests++;
+      response.statusCode = 403;
+      response.end("{}");
+    }, async (url) => {
+      for (const grams of [0, -1, NaN, Infinity]) {
+        await assert.rejects(consumeExternalSpool("spoolman", { url, apiKey: "" }, 1, grams));
+      }
+      assert.equal(requests, 0);
+      await assert.rejects(consumeExternalSpool("spoolman", { url, apiKey: "" }, 1, 1),
+        (error: unknown) => error instanceof FilamentServiceError && error.code === "auth");
+      assert.equal(requests, 1);
+    });
+  });

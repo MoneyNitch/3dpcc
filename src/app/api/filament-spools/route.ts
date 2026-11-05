@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getFilamentConnections } from "@/lib/filamentConfig";
-import { fetchExternalSpools, FILAMENT_PROVIDERS, FilamentServiceError, type ExternalSpoolResult } from "@/lib/externalFilaments";
+import { consumeExternalSpool, fetchExternalSpools, FILAMENT_PROVIDERS, FilamentServiceError, type ExternalSpoolResult } from "@/lib/externalFilaments";
 import { authorize } from "@/lib/auth/server";
+import { z } from "zod";
+import { ApiError, readJson } from "@/lib/api/http";
 
 export async function GET(request: Request) {
   const denied = await authorize(request, "prints.read");
@@ -17,10 +19,51 @@ export async function GET(request: Request) {
           console.error(`Could not load filament spools (${provider}): ${error.code}`);
           return { provider, spools: [], error: error.code };
         }
+
       }));
     return NextResponse.json({ results }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     console.error("Could not read filament connection configuration.");
     return NextResponse.json({ error: "config" }, { status: 500 });
+  }
+}
+
+const consumptionSchema = z.strictObject({
+  provider: z.enum(FILAMENT_PROVIDERS),
+  sourceUrl: z.string().min(1),
+  id: z.number().int().positive(),
+  grams: z.number().finite().positive(),
+  confirmed: z.literal(true),
+});
+
+export async function POST(request: Request) {
+  const denied = await authorize(request, "prints.write");
+  if (denied) return denied;
+  let mutationStarted = false;
+  try {
+    const parsed = consumptionSchema.safeParse(await readJson(request));
+    if (!parsed.success) return NextResponse.json({ error: "input" }, { status: 400 });
+    const { provider, sourceUrl, id, grams } = parsed.data;
+    const connection = getFilamentConnections()[provider];
+    if (!connection.url || connection.url !== sourceUrl) {
+      return NextResponse.json({ error: "source" }, { status: 409 });
+    }
+    const spool = (await fetchExternalSpools(provider, connection)).find((item) => item.id === id);
+    if (!spool) return NextResponse.json({ error: "missing" }, { status: 404 });
+    if (spool.remainingGrams === null || spool.remainingGrams < grams) {
+      return NextResponse.json({ error: "stock" }, { status: 409 });
+    }
+    mutationStarted = true;
+    await consumeExternalSpool(provider, connection, id, grams);
+    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) {
+    console.error("External spool consumption failed:", error instanceof FilamentServiceError ? error.code : error);
+    if (error instanceof ApiError) {
+      return NextResponse.json({ error: "input" }, { status: error.status });
+    }
+    if (error instanceof FilamentServiceError && error.code === "auth") {
+      return NextResponse.json({ error: "auth" }, { status: 403 });
+    }
+    return NextResponse.json({ error: mutationStarted ? "uncertain" : "connection" }, { status: 502 });
   }
 }

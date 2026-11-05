@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { AppSettings } from "@/lib/types";
 import { calculateAllPlatesCost, calculateCost, findFilamentPrice, findPrinter } from "@/lib/costCalculator";
-import { externalSpoolKey, type ExternalSpoolResult } from "@/lib/externalFilaments";
+import { externalSpoolKey, spoolConsumptionForFilaments, type ExternalSpoolResult } from "@/lib/externalFilaments";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol, getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
@@ -24,6 +24,9 @@ export function CostCalculator({
   const [loadingSpools, setLoadingSpools] = useState(false);
   const [spoolError, setSpoolError] = useState(false);
   const [priceInputVersion, setPriceInputVersion] = useState(0);
+  const [consuming, setConsuming] = useState(false);
+  const [consumedKeys, setConsumedKeys] = useState<string[]>([]);
+  const [consumptionMessage, setConsumptionMessage] = useState<{ error: boolean; text: string } | null>(null);
   const spools = spoolResults?.flatMap((result) => result.spools) ?? [];
   const unit = currencySymbol(currency, lang);
   const formatDecimal = (value: number, maximumFractionDigits = 2) =>
@@ -55,6 +58,48 @@ export function CostCalculator({
     }
     return [...totals.values()];
   }, [allSelected, plates, plate]);
+  const spoolConsumption = spoolConsumptionForFilaments(costFilaments, inputs.externalSpools ?? {}, inputs.quantity);
+
+  async function consumeSpool(key: string) {
+    const entry = spoolConsumption.get(key);
+    if (!entry || consuming) return;
+    if (!window.confirm(t("filamentDb.consumeConfirm", {
+      name: entry.spool.name,
+      grams: formatDecimal(entry.grams, 3),
+    }))) return;
+    setConsuming(true);
+    setConsumptionMessage(null);
+    let knownRejection = false;
+    try {
+      const response = await fetch("/api/filament-spools", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: entry.spool.provider,
+          sourceUrl: entry.spool.sourceUrl,
+          id: entry.spool.id,
+          grams: entry.grams,
+          confirmed: true,
+        }),
+      });
+      const body: { error?: string } = await response.json();
+      if (!response.ok) {
+        knownRejection = body.error !== undefined && body.error !== "uncertain";
+        throw new Error(t(`filamentDb.consumeError.${body.error ?? "uncertain"}`));
+      }
+      setConsumedKeys((keys) => [...keys, key]);
+      setConsumptionMessage({ error: false, text: t("filamentDb.consumed") });
+      await loadSpools();
+    } catch (error) {
+      if (!knownRejection) setConsumedKeys((keys) => keys.includes(key) ? keys : [...keys, key]);
+      setConsumptionMessage({
+        error: true,
+        text: knownRejection && error instanceof Error ? error.message : t("filamentDb.consumeError.uncertain"),
+      });
+    } finally {
+      setConsuming(false);
+    }
+  }
 
   const inputClass =
     "mt-1 min-w-0 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
@@ -196,6 +241,21 @@ export function CostCalculator({
             </div>
           );
         })}
+        {[...spoolConsumption].map(([key, { spool, grams }]) => (
+          <button key={key} type="button"
+            disabled={!canSave || consuming || consumedKeys.includes(key) || !spool.sourceUrl || grams <= 0}
+            onClick={() => void consumeSpool(key)}
+            className="rounded-lg border border-orange-300 px-3 py-2 text-left text-xs text-orange-700 disabled:opacity-50 dark:border-orange-800 dark:text-orange-300">
+            {consumedKeys.includes(key) ? t("filamentDb.consumeHandled") :
+              t("filamentDb.consume", { name: spool.name, grams: formatDecimal(grams, 3) })}
+          </button>
+        ))}
+        {consumptionMessage && (
+          <p role={consumptionMessage.error ? "alert" : "status"}
+            className={`text-xs ${consumptionMessage.error ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}>
+            {consumptionMessage.text}
+          </p>
+        )}
       </div>
 
       <div className="mt-4 flex flex-col gap-2">

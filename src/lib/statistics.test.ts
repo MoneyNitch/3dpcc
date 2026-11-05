@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { calculateAllPlatesCost, defaultCostInputs } from "./costCalculator";
 import { defaultSettings } from "./db/shared";
 import { calculatePrintStatistics } from "./statistics";
+import { calculateOrderSnapshot, createOrderCalculation } from "./orderCalculation";
 import type { ParsedPlate, ParsedPrint, PrintOrder } from "./types";
 
 const plate: ParsedPlate = {
@@ -67,4 +68,26 @@ test("aggregates saved print time and material and values only completed orders"
       quantity: 2,
     }).totalPrice
   );
+});
+
+test("completed orders use their frozen order price instead of current print settings", () => {
+  const completed = order("completed");
+  const snapshot = createOrderCalculation(completed, [{ print, costInputs: null }], defaultSettings);
+  snapshot.inputs.shippingCost = 25;
+  const changedSettings = structuredClone(defaultSettings);
+  changedSettings.materials[0].pricePerKg = 900;
+  const result = calculatePrintStatistics(
+    [{ print, costInputs: null }], [{ ...completed, calculation: snapshot }], changedSettings,
+  );
+  assert.equal(result.completedOrderValue, calculateOrderSnapshot(snapshot).totals.totalPrice);
+  const mixed = calculatePrintStatistics(
+    [{ print, costInputs: null }],
+    [{ ...completed, calculation: snapshot }, { ...completed, id: "foreign-order", calculation: { ...snapshot, currency: "USD" } }],
+    { ...defaultSettings, general: { ...defaultSettings.general, currency: "EUR" } },
+  );
+  assert.equal(mixed.completedOrderValue, result.completedOrderValue);
+  assert.deepEqual(mixed.completedOrderValues, [
+    { currency: "EUR", value: result.completedOrderValue },
+    { currency: "USD", value: result.completedOrderValue },
+  ]);
 });

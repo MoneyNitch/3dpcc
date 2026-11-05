@@ -3,8 +3,42 @@ import { z } from "zod";
 import { ApiError } from "@/lib/api/http";
 import { deleteOrder, listPrints, listOrders, saveOrder } from "@/lib/db";
 import { authorize } from "@/lib/auth/server";
-import { orderInputSchema, readOrderBody } from "@/lib/orders";
+import { orderInputSchema, orderQuickUpdateSchema, readOrderBody } from "@/lib/orders";
+import { orderGcodeFiles } from "@/lib/orderGcode";
 import type { PrintOrder } from "@/lib/types";
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const denied = await authorize(request, "documents.write");
+  if (denied) return denied;
+  const { id } = await params;
+  if (!z.uuid().safeParse(id).success) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
+
+  let body: unknown;
+  try {
+    body = await readOrderBody(request);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+  const parsed = orderQuickUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Bitte wähle einen gültigen Status oder eine gültige Priorität." }, { status: 400 });
+  }
+  const order = (await listOrders()).find((item) => item.id === id);
+  if (!order) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
+  const updated: PrintOrder = {
+    ...order,
+    ...parsed.data,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveOrder(updated);
+  return NextResponse.json({ order: updated }, { headers: { "Cache-Control": "private, no-store" } });
+}
 
 export async function PUT(
   request: NextRequest,
@@ -54,6 +88,7 @@ export async function DELETE(
   if (!z.uuid().safeParse(id).success) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
   const exists = (await listOrders()).some((order) => order.id === id);
   if (!exists) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
+  await orderGcodeFiles.remove(id);
   await deleteOrder(id);
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });
 }

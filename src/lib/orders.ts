@@ -1,9 +1,17 @@
 import { z } from "zod";
 import { ApiError, readBody } from "./api/http";
 
+export const orderStatusSchema = z.enum(["open", "in_progress", "ready", "completed", "cancelled"]);
+export const orderPrioritySchema = z.enum(["low", "normal", "high"]);
+export const orderQuickUpdateSchema = z.strictObject({
+  status: orderStatusSchema.optional(),
+  priority: orderPrioritySchema.optional(),
+}).refine((value) => value.status !== undefined || value.priority !== undefined);
+
 export const orderInputSchema = z.strictObject({
   customerName: z.string().trim().min(1).max(200),
-  status: z.enum(["open", "in_progress", "ready", "completed", "cancelled"]),
+  status: orderStatusSchema,
+  priority: orderPrioritySchema.default("normal"),
   dueDate: z.iso.date().nullable(),
   notes: z.string().max(5000),
   items: z.array(z.strictObject({

@@ -30,13 +30,14 @@ export default async function StatisticsPage() {
   const lang = settings.general.language;
   const t = (key: string) => translate(lang, key, undefined, settings.customLanguagePacks);
   const number = new Intl.NumberFormat(lang, { maximumFractionDigits: 1 });
-  const money = new Intl.NumberFormat(lang, {
-    style: "currency",
-    currency: settings.general.currency,
-  });
   const maxMaterialGrams = statistics.materials[0]?.grams ?? 0;
   const cards = [
-    { label: t("stats.income"), value: money.format(statistics.completedOrderValue), detail: t("stats.incomeDetail") },
+    {
+      label: t("stats.income"),
+      value: statistics.completedOrderValues.map(({ currency, value }) =>
+        new Intl.NumberFormat(lang, { style: "currency", currency }).format(value)).join(" / "),
+      detail: t("stats.incomeDetail"),
+    },
     { label: t("stats.prints"), value: number.format(statistics.printCount), detail: t("stats.printsDetail") },
     { label: t("stats.printTime"), value: formatPrintTime(statistics.printTimeSeconds, lang, t), detail: t("stats.printTimeDetail") },
     { label: t("stats.material"), value: `${number.format(statistics.materialGrams)} g`, detail: t("stats.materialDetail") },

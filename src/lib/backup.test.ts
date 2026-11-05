@@ -20,6 +20,8 @@ test("encrypted full backups restore application records, auth and local files",
     import { getAuthStore } from ${url("./auth/store.ts")};
     import { getFilamentConnections, saveFilamentConnection } from ${url("./filamentConfig.ts")};
     import { originalArchives } from ${url("./originalArchives.ts")};
+    import { orderGcodeFiles } from ${url("./orderGcode.ts")};
+    import { createOrderCalculation } from ${url("./orderCalculation.ts")};
 
     const authStore = getAuthStore();
     await authStore.initialize();
@@ -42,12 +44,21 @@ test("encrypted full backups restore application records, auth and local files",
     await db.savePrintCostInputs(id, defaultCostInputs(await db.getSettings()));
     await db.savePrintModel(id, Buffer.from("saved-preview"));
     const orderId = randomUUID();
+    const gcode = Buffer.from("G28\\nG1 X10");
     await db.saveOrder({
       id: orderId, customerName: "Backup customer", status: "in_progress", dueDate: "2026-12-01",
-      notes: "Keep this order", items: [{ printId: id, quantity: 3 }], createdAt: now, updatedAt: now,
+      notes: "Keep this order", items: [{ printId: id, quantity: 3 }],
+      gcodeAttachment: { fileName: "backup.gcode", size: gcode.byteLength }, createdAt: now, updatedAt: now,
     });
+    const savedOrder = (await db.listOrders())[0];
+    const orderCalculation = createOrderCalculation(savedOrder, [{
+      print, costInputs: await db.getPrintCostInputs(id),
+    }], await db.getSettings());
+    orderCalculation.inputs.shippingCost = 9;
+    await db.saveOrder({ ...savedOrder, calculation: orderCalculation });
     const original = Buffer.from("original-source-archive");
     await originalArchives.save(id, original);
+    await orderGcodeFiles.save(orderId, gcode);
     saveFilamentConnection("spoolman", { url: "http://localhost:7912", apiKey: "restore-secret" });
 
     const backup = await createBackup("a sufficiently long backup passphrase");
@@ -56,6 +67,7 @@ test("encrypted full backups restore application records, auth and local files",
     const changedSettings = await db.getSettings();
     await db.saveSettings({ ...changedSettings, general: { ...changedSettings.general, companyName: "Changed" } });
     await db.deleteOrder(orderId);
+    await orderGcodeFiles.remove(orderId);
     const store = (await import(${url("./db/sqliteStore.ts")})).createSqliteStore();
     await store.deletePrint(id);
     await originalArchives.save(id, Buffer.from("changed"));
@@ -67,6 +79,9 @@ test("encrypted full backups restore application records, auth and local files",
     assert.equal((await db.getPrintCostInputs(id)).quantity, 1);
     assert.deepEqual(await db.getPrintModel(id), Buffer.from("saved-preview"));
     assert.equal((await db.listOrders())[0].id, orderId);
+    assert.equal((await db.listOrders())[0].gcodeAttachment.fileName, "backup.gcode");
+    assert.deepEqual((await db.listOrders())[0].calculation, orderCalculation);
+    assert.deepEqual(await orderGcodeFiles.read(orderId), gcode);
     assert.deepEqual(await originalArchives.read(id), original);
     assert.equal(getFilamentConnections().spoolman.apiKey, "restore-secret");
     assert.equal(getAuthStore().overview().users.some((user) => user.username === "admin"), true);

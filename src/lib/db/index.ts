@@ -1,7 +1,8 @@
-import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { resolveDbConnection, type ResolvedDbConnection } from "../dbConfig";
-import type { ApplicationDataSnapshot, DataStore } from "./shared";
+import { materialBookingActiveKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 import { originalArchives } from "../originalArchives";
+import { softwareUpdates } from "../softwareUpdates";
 
 // The active backend is resolved from the DB config saved via Settings (data/db-config.json),
 // falling back to DB_DRIVER/DATABASE_URL env vars if nothing was saved there yet.
@@ -38,7 +39,8 @@ export async function getSettings(): Promise<AppSettings> {
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
-  return (await getStore()).saveSettings(settings);
+  await (await getStore()).saveSettings(settings);
+  softwareUpdates.configure(settings.general);
 }
 
 export async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -101,8 +103,74 @@ export async function listOrders(): Promise<PrintOrder[]> {
   return (await getStore()).listOrders();
 }
 
-export async function saveOrder(order: PrintOrder): Promise<void> {
-  return (await getStore()).saveOrder(order);
+export async function saveOrder(order: PrintOrder): Promise<PrintOrder> {
+  const store = await getStore();
+  const existing = (await store.listOrders()).find((item) => item.id === order.id);
+  let saved: PrintOrder;
+  if (!existing) {
+    const history = order.history ?? [
+      { type: "created" as const, at: order.createdAt },
+      ...(order.status === "completed" ? [{ type: "completed" as const, at: order.createdAt }] : []),
+    ];
+    saved = { ...order, history };
+  } else if (existing.updatedAt !== order.updatedAt) {
+    const history = existing.history ?? [{ type: "created" as const, at: existing.createdAt }];
+    saved = {
+      ...order,
+      history: [
+        ...history,
+        { type: "updated", at: order.updatedAt },
+        ...(existing.status !== "completed" && order.status === "completed"
+          ? [{ type: "completed" as const, at: order.updatedAt }]
+          : []),
+      ],
+    };
+  } else {
+    saved = { ...order, history: order.history ?? existing.history };
+  }
+  await store.saveOrder(saved);
+  return saved;
+}
+
+export async function saveOrderQueue(orders: PrintOrder[]): Promise<void> {
+  const store = await getStore();
+  const currentOrders = await store.listOrders();
+  const byId = new Map(currentOrders.map((order) => [order.id, order]));
+  const updatedAt = new Date().toISOString();
+  const updatedOrders = orders.map((order) => {
+    const current = byId.get(order.id);
+    if (!current) throw new Error("Auftrag nicht gefunden.");
+    const history = current.history ?? [{ type: "created" as const, at: current.createdAt }];
+    return {
+      ...current,
+      queuePosition: order.queuePosition,
+      updatedAt,
+      history: [...history, { type: "updated" as const, at: updatedAt }],
+    };
+  });
+  await store.saveOrderQueue(updatedOrders);
+}
+
+export async function listMaterialBookings(printId?: string): Promise<MaterialBooking[]> {
+  return (await getStore()).listMaterialBookings(printId);
+}
+
+export async function createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean> {
+  return (await getStore()).createMaterialBooking(booking, activeKey);
+}
+
+export async function saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void> {
+  return (await getStore()).saveMaterialBooking(booking, activeKey);
+}
+
+export async function listAccessoryStockMovements(): Promise<AccessoryStockMovement[]> {
+  return (await getStore()).listAccessoryStockMovements();
+}
+
+export async function applyAccessoryStockMovements(
+  movements: AccessoryStockMovement[],
+): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found"> {
+  return (await getStore()).applyAccessoryStockMovements(movements);
 }
 
 export async function deleteOrder(id: string): Promise<void> {
@@ -111,14 +179,18 @@ export async function deleteOrder(id: string): Promise<void> {
 
 export async function getApplicationDataSnapshot(): Promise<ApplicationDataSnapshot> {
   const store = await getStore();
-  const [settings, prints, orders] = await Promise.all([
+  const [settings, prints, orders, materialBookings, accessoryStockMovements] = await Promise.all([
     store.getSettings(),
     store.listPrints(),
     store.listOrders(),
+    store.listMaterialBookings(),
+    store.listAccessoryStockMovements(),
   ]);
   return {
     settings,
     orders,
+    materialBookings,
+    accessoryStockMovements,
     prints: await Promise.all(prints.map(async (print) => ({
       print,
       costInputs: await store.getPrintCostInputs(print.id),
@@ -128,7 +200,8 @@ export async function getApplicationDataSnapshot(): Promise<ApplicationDataSnaps
 }
 
 export async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
-  return (await getStore()).replaceApplicationData(data);
+  await (await getStore()).replaceApplicationData(data);
+  softwareUpdates.configure(data.settings.general);
 }
 
 /** Copies all application data into a verified target store before it becomes active. */
@@ -154,5 +227,12 @@ export async function transferDatabaseData(targetConnection: ResolvedDbConnectio
   }
   for (const order of await source.listOrders()) {
     await target.saveOrder(order);
+  }
+  for (const booking of await source.listMaterialBookings()) {
+    await target.createMaterialBooking(booking, materialBookingActiveKey(booking));
+  }
+  const accessoryMovements = await source.listAccessoryStockMovements();
+  if (accessoryMovements.length) {
+    await target.importAccessoryStockMovements(accessoryMovements);
   }
 }

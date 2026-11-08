@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MaterialBooking } from "./types";
 
 export const FILAMENT_PROVIDERS = ["spoolman", "filaman"] as const;
 export type FilamentProvider = (typeof FILAMENT_PROVIDERS)[number];
@@ -14,6 +15,21 @@ export interface FilamentConnectionView {
 }
 
 export type FilamentConnectionsView = Record<FilamentProvider, FilamentConnectionView>;
+
+export const materialBookingSchema = z.strictObject({
+  id: z.uuid(),
+  printId: z.uuid(),
+  provider: z.enum(FILAMENT_PROVIDERS),
+  sourceUrl: z.string().min(1).max(2048),
+  spoolId: z.number().int().positive(),
+  spoolName: z.string().min(1).max(500),
+  grams: z.number().finite().positive(),
+  kind: z.enum(["consumption", "reversal"]),
+  status: z.enum(["pending", "confirmed", "uncertain", "rejected"]),
+  relatedBookingId: z.uuid().optional(),
+  note: z.string().max(1000).optional(),
+  createdAt: z.iso.datetime(),
+}) satisfies z.ZodType<MaterialBooking>;
 
 export const externalSpoolSchema = z.object({
   provider: z.enum(FILAMENT_PROVIDERS),

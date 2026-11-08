@@ -58,6 +58,11 @@ tower and total) and multi-color information, and calculates print costs.
   overdue, today, future and undated orders. Resetting filters restores the default
   view without changing the selected sort order.
 - Open an order to view its details, G-code attachment and independent calculation.
+  The order history records creation, every saved change and completion times.
+  Assign active orders to configured printers in the order form. The print schedule
+  shows each printer's queue and expected occupancy from saved print times multiplied
+  by order quantities; unknown print times are called out instead of guessed.
+  Queues initially sort by due date and then priority and can be manually reordered.
   Edit per-unit material, accessory, electricity and machine costs for each position;
   position quantities come from the order. Labor, packaging and shipping are charged
   once per order. Margin, an explicit order discount and tax apply to the total.
@@ -73,6 +78,17 @@ tower and total) and multi-color information, and calculates print costs.
   rather than adding or converting their values.
 - Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
+- **Accessory inventory** under Settings → Accessories stores pack prices,
+  units per pack and stock quantities. Record receipts and signed corrections
+  with a movement history. Select catalog accessories in a print's additional
+  costs, then explicitly confirm stock deduction from the calculator; order
+  details can deduct the selected accessories for all saved print positions.
+  Repeated deductions and deductions exceeding available stock are blocked.
+  Inventory and its history are included in application backups.
+  Use **Update stock for this print** below quote creation to deduct all selected
+  spools and accessories with one confirmation. Filament usage follows the current
+  plate selection and print quantity. Results are shown separately because external
+  spool services and local accessory inventory cannot share an atomic transaction.
 - Interactive 3D preview: embedded model meshes when available, otherwise a
   complete G-code toolpath preview (including XY arcs), rendered using WebGL2
   as solid filament strands with slicer-provided widths and layer heights.
@@ -205,8 +221,10 @@ unknown or insufficient stock is rejected. FilaMan requires the additional
 
 There are no automatic retries. If a request times out or its result is uncertain,
 check the external inventory before trying again: the booking may already have
-succeeded. This is an explicit consumption booking, not an automatic print tracker;
-booking again after reloading the page deducts material again.
+succeeded. Each attempt is kept in the database-backed booking journal and included
+in backups. The same print and spool cannot be booked again accidentally after a
+reload; uncertain outcomes stay blocked until checked. A confirmed reversal adds an
+internal journal entry only and does not change the external spool stock.
 
 The integration uses Spoolman's `/api/v1/spool` list and FilaMan System's
 paginated `/api/v1/spools` API. Results are limited to 10,000 spools per service,
@@ -299,6 +317,33 @@ created automatically when needed. These files contain prints, settings and
 invoice data and are intentionally excluded from the repository by
 `.gitignore`.
 
+### Changelog, update checks and offline operation
+
+**Settings → Changelog & updates** shows the bundled `CHANGELOG.md` and can load
+the current file from GitHub's default branch. Stable releases (not prereleases
+or branch commits) are compared numerically with the installed package version;
+a newer release shows a notification in Settings. No update is installed automatically.
+
+Both **Load current changelog from GitHub** and **Check for updates on GitHub**
+are enabled by default and saved immediately, independently, for the entire
+installation. Turn both off for **zero GitHub traffic from these two features**;
+the bundled changelog remains readable. Markdown is formatted with a separate card
+for each level-two release heading, including Unreleased. Raw HTML is ignored and
+images are displayed as text to prevent automatic external requests; HTTP(S) links
+only contact their destination when explicitly opened. There are no timers or background checks.
+When enabled, opening Settings makes server-side requests to `api.github.com`,
+with a one-hour success cache, a five-minute error cache, a 10-second timeout
+and a 512 KiB response limit. **Refresh from GitHub now** bypasses the cache.
+No print, customer or credential data is sent; GitHub sees the server's public
+IP address and the application's generic User-Agent. Release links contact
+GitHub only when explicitly opened. Errors are visible, with local changelog
+fallback rather than a claim that the installation is up to date.
+
+These switches are not a global network firewall: filament integrations, Next.js
+telemetry and other system services are independent. For a fully isolated
+installation, also disable external integrations, set `NEXT_TELEMETRY_DISABLED=1`
+and enforce outbound blocking at the OS/container/network level.
+
 ### Login and roles
 
 Login is **enabled by default**. On the first login use **admin / admin**.
@@ -314,6 +359,8 @@ disable or delete accounts, reset passwords, define named custom roles and
 issue/revoke user-bound API keys. New/reset passwords must be changed at the
 next login. Click your username in the navigation to open the user menu with
 **Change password** and **Sign out**.
+Each role card offers **View permissions**, including the predefined Viewer,
+Admin and Superadmin roles. The list is read-only; built-in roles remain immutable.
 
 Under **Password requirements**, superadmins can set the minimum length
 (4–128 characters) and independently require uppercase letters, lowercase

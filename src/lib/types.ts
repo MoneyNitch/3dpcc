@@ -87,12 +87,20 @@ export interface ParsedPrint {
 
 export type OrderStatus = "open" | "in_progress" | "ready" | "completed" | "cancelled";
 export type OrderPriority = "low" | "normal" | "high";
+export type OrderHistoryEventType = "created" | "updated" | "completed";
+
+export interface OrderHistoryEntry {
+  type: OrderHistoryEventType;
+  at: string;
+}
 
 export interface PrintOrder {
   id: string;
   customerName: string;
   status: OrderStatus;
   priority?: OrderPriority;
+  printerId?: string | null;
+  queuePosition?: number;
   gcodeAttachment?: { fileName: string; size: number };
   calculation?: OrderCalculationSnapshot;
   dueDate: string | null;
@@ -100,6 +108,25 @@ export interface PrintOrder {
   items: { printId: string; quantity: number }[];
   createdAt: string;
   updatedAt: string;
+  history?: OrderHistoryEntry[];
+}
+
+export type MaterialBookingStatus = "pending" | "confirmed" | "uncertain" | "rejected";
+export type MaterialBookingKind = "consumption" | "reversal";
+
+export interface MaterialBooking {
+  id: string;
+  printId: string;
+  provider: "spoolman" | "filaman";
+  sourceUrl: string;
+  spoolId: number;
+  spoolName: string;
+  grams: number;
+  kind: MaterialBookingKind;
+  status: MaterialBookingStatus;
+  relatedBookingId?: string;
+  note?: string;
+  createdAt: string;
 }
 
 export interface Material {
@@ -116,6 +143,18 @@ export interface AccessoryMaterial {
   name: string;
   pricePerPack: number;
   unitsPerPack: number;
+  stockQuantity: number;
+}
+
+export interface AccessoryStockMovement {
+  id: string;
+  accessoryId: string;
+  accessoryName: string;
+  quantity: number;
+  kind: "receipt" | "adjustment" | "consumption";
+  reference: string;
+  referenceKey: string | null;
+  createdAt: string;
 }
 
 export interface PrinterProfile {
@@ -231,6 +270,8 @@ export interface GeneralSettings {
   enable3dPreview: boolean;
   retainOriginalArchives: boolean;
   previewComputePercent: number;
+  fetchGithubChangelog: boolean;
+  checkGithubUpdates: boolean;
   companyName: string;
   companyAddress: string;
   companyEmail: string;
@@ -249,6 +290,7 @@ export interface ExtraCostItem {
   name: string;
   cost: number;
   quantity: number;
+  accessoryId?: string;
 }
 
 export interface CostResult {

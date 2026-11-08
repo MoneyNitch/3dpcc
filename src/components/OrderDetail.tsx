@@ -9,6 +9,7 @@ import {
   type OrderCalculationInputs, type OrderCalculationSnapshot,
 } from "@/lib/orderCalculation";
 import type { OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
+import { AccessoryStockAction } from "./AccessoryStockAction";
 
 const statuses: OrderStatus[] = ["open", "in_progress", "ready", "completed", "cancelled"];
 const priorities: OrderPriority[] = ["low", "normal", "high"];
@@ -60,10 +61,11 @@ function DecimalInput({ value, max, className, onChange }: {
   );
 }
 
-export function OrderDetail({ initialOrder, initialSnapshot, canEdit }: {
+export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccessoryStockItems }: {
   initialOrder: PrintOrder;
   initialSnapshot: OrderCalculationSnapshot;
   canEdit: boolean;
+  hasAccessoryStockItems: boolean;
 }) {
   const { t, lang } = useLocale();
   const [order, setOrder] = useState(initialOrder);
@@ -175,8 +177,27 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit }: {
         </a>}
       </header>
 
+      <section className={cardClass} aria-labelledby="order-history-heading">
+        <h2 id="order-history-heading" className="text-lg font-semibold">{t("orders.history.title")}</h2>
+        <ol className="mt-4 flex flex-col gap-3">
+          {(order.history ?? [
+            { type: "created" as const, at: order.createdAt },
+            { type: "updated" as const, at: order.updatedAt },
+            ...(order.status === "completed" ? [{ type: "completed" as const, at: order.updatedAt }] : []),
+          ]).map((entry, index) => (
+            <li key={`${entry.type}:${entry.at}:${index}`} className="flex flex-wrap justify-between gap-2 text-sm">
+              <span>{t(`orders.history.${entry.type}`)}</span>
+              <time dateTime={entry.at} className="text-slate-500 dark:text-slate-400">{date(entry.at)}</time>
+            </li>
+          ))}
+        </ol>
+      </section>
+
       {message && <p role={message.error ? "alert" : "status"}
         className={`text-sm ${message.error ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}>{message.text}</p>}
+      {hasAccessoryStockItems && (
+        <AccessoryStockAction source="order" sourceId={order.id} canBook={canEdit} />
+      )}
       <form onSubmit={submit} className={cardClass}>
         <h2 className="text-lg font-semibold">{t("orders.calculationTitle")}</h2>
         <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{t("orders.independentNote")}</p>

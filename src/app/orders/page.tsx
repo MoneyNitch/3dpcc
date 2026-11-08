@@ -28,7 +28,14 @@ export default async function OrdersPage({ searchParams }: {
         initialEditingOrderId={edit}
         initialToday={localDateKey(new Date())}
         initialOrders={orders}
-        prints={prints.map((print) => ({ id: print.id, name: print.displayName ?? print.fileName }))}
+        prints={prints.map((print) => ({
+          id: print.id,
+          name: print.displayName ?? print.fileName,
+          durationSeconds: (print.plates ?? [print.plate]).reduce(
+            (total, plate) => total + plate.totalPrintTimeSeconds, 0,
+          ),
+        }))}
+        printers={settings.printers.map(({ id, name }) => ({ id, name }))}
         canEdit={hasPermission(user, "documents.write", authEnabled())}
       />
     </div>

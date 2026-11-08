@@ -1,4 +1,5 @@
-import type { AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { createHash } from "node:crypto";
+import type { AccessoryStockMovement, AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { randomUUID } from "../clientId";
 import { isCurrencyCode } from "../currency";
 
@@ -19,7 +20,14 @@ export interface DataStore {
   savePrintCostInputs(id: string, inputs: PrintCostInputs): Promise<void>;
   listOrders(): Promise<PrintOrder[]>;
   saveOrder(order: PrintOrder): Promise<void>;
+  saveOrderQueue(orders: PrintOrder[]): Promise<void>;
   deleteOrder(id: string): Promise<void>;
+  listMaterialBookings(printId?: string): Promise<MaterialBooking[]>;
+  createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean>;
+  saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void>;
+  listAccessoryStockMovements(): Promise<AccessoryStockMovement[]>;
+  applyAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found">;
+  importAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<void>;
   replaceApplicationData(data: ApplicationDataSnapshot): Promise<void>;
 }
 
@@ -42,6 +50,31 @@ export interface ApplicationDataSnapshot {
     models: { plateIndex: number | null; model: Buffer }[];
   }[];
   orders: PrintOrder[];
+  materialBookings: MaterialBooking[];
+  accessoryStockMovements: AccessoryStockMovement[];
+}
+
+export function preserveAccessoryStock(settings: AppSettings, current: AppSettings): AppSettings {
+  const stockById = new Map(current.accessoryMaterials.map((item) => [item.id, item.stockQuantity]));
+  return {
+    ...settings,
+    accessoryMaterials: settings.accessoryMaterials.map((item) => ({
+      ...item,
+      stockQuantity: stockById.get(item.id) ?? 0,
+    })),
+  };
+}
+
+export function materialBookingActiveKey(booking: MaterialBooking): string | null {
+  if (booking.kind === "reversal") {
+    return booking.relatedBookingId
+      ? createHash("sha256").update(`reversal:${booking.relatedBookingId}`).digest("hex")
+      : null;
+  }
+  if (!["pending", "confirmed", "uncertain"].includes(booking.status)) return null;
+  return createHash("sha256")
+    .update(JSON.stringify([booking.printId, booking.provider, booking.sourceUrl, booking.spoolId]))
+    .digest("hex");
 }
 
 export function printModelKey(id: string, plateIndex?: number): string {
@@ -113,6 +146,8 @@ export const defaultSettings: AppSettings = {
     enable3dPreview: true,
     retainOriginalArchives: false,
     previewComputePercent: 25,
+    fetchGithubChangelog: true,
+    checkGithubUpdates: true,
     companyName: "",
     companyAddress: "",
     companyEmail: "",
@@ -155,6 +190,11 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (result.general.previewComputePercent === undefined) {
     result = { ...result, general: { ...result.general, previewComputePercent: defaultSettings.general.previewComputePercent } };
   }
+  for (const field of ["fetchGithubChangelog", "checkGithubUpdates"] as const) {
+    if (result.general[field] === undefined) {
+      result = { ...result, general: { ...result.general, [field]: defaultSettings.general[field] } };
+    }
+  }
   for (const field of [
     "companyName",
     "companyAddress",
@@ -173,6 +213,13 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (!result.accessoryMaterials) {
     result = { ...result, accessoryMaterials: [] };
   }
+  result = {
+    ...result,
+    accessoryMaterials: result.accessoryMaterials.map((item) => ({
+      ...item,
+      stockQuantity: Number.isInteger(item.stockQuantity) && item.stockQuantity >= 0 ? item.stockQuantity : 0,
+    })),
+  };
   if (!result.customLanguagePacks) {
     result = { ...result, customLanguagePacks: [] };
   }

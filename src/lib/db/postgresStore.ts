@@ -1,6 +1,6 @@
 import { Pool } from "pg";
-import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
-import { defaultSettings, migrateSettings, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
+import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { defaultSettings, materialBookingActiveKey, migrateSettings, preserveAccessoryStock, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 async function ensureSchema(pool: Pool): Promise<void> {
   await pool.query(`
@@ -39,6 +39,24 @@ async function ensureSchema(pool: Pool): Promise<void> {
       PRIMARY KEY (order_id, print_id)
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS material_bookings (
+      id TEXT PRIMARY KEY,
+      print_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      active_key TEXT UNIQUE,
+      data TEXT NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS accessory_stock_movements (
+      id TEXT PRIMARY KEY,
+      accessory_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      reference_key TEXT UNIQUE,
+      data TEXT NOT NULL
+    )
+  `);
 }
 
 /** PostgreSQL backend. Pass an explicit connection string, or omit to read DATABASE_URL. */
@@ -64,11 +82,23 @@ export function createPostgresStore(connectionString?: string): DataStore {
 
   async function saveSettings(settings: AppSettings): Promise<void> {
     await ready;
-    await pool.query(
-      `INSERT INTO settings (id, data) VALUES (1, $1)
-       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
-      [JSON.stringify(settings)]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<{ data: string }>("SELECT data FROM settings WHERE id = 1 FOR UPDATE");
+      const next = rows[0] ? preserveAccessoryStock(settings, migrateSettings(JSON.parse(rows[0].data))) : settings;
+      await client.query(
+        `INSERT INTO settings (id, data) VALUES (1, $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        [JSON.stringify(next)]
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -203,9 +233,150 @@ export function createPostgresStore(connectionString?: string): DataStore {
     }
   }
 
+  async function saveOrderQueue(orders: PrintOrder[]): Promise<void> {
+    await ready;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const order of orders) {
+        const result = await client.query(
+          "UPDATE orders SET updated_at = $1, data = $2 WHERE id = $3",
+          [order.updatedAt, JSON.stringify(order), order.id]
+        );
+        if (result.rowCount !== 1) throw new Error("Auftrag nicht gefunden.");
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async function deleteOrder(id: string): Promise<void> {
     await ready;
     await pool.query("DELETE FROM orders WHERE id = $1", [id]);
+  }
+
+  async function listMaterialBookings(printId?: string): Promise<MaterialBooking[]> {
+    await ready;
+    const { rows } = printId
+      ? await pool.query<{ data: string }>("SELECT data FROM material_bookings WHERE print_id = $1 ORDER BY created_at DESC", [printId])
+      : await pool.query<{ data: string }>("SELECT data FROM material_bookings ORDER BY created_at DESC");
+    return rows.map((row) => JSON.parse(row.data) as MaterialBooking);
+  }
+
+  async function createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean> {
+    await ready;
+    const { rowCount } = await pool.query(
+      "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+      [booking.id, booking.printId, booking.createdAt, activeKey, JSON.stringify(booking)]
+    );
+    return rowCount === 1;
+  }
+
+  async function saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void> {
+    await ready;
+    const { rowCount } = await pool.query(
+      "UPDATE material_bookings SET active_key = $1, data = $2 WHERE id = $3",
+      [activeKey, JSON.stringify(booking), booking.id]
+    );
+    if (rowCount !== 1) throw new Error("Materialbuchung nicht gefunden.");
+  }
+
+  async function listAccessoryStockMovements(): Promise<AccessoryStockMovement[]> {
+    await ready;
+    const { rows } = await pool.query<{ data: string }>(
+      "SELECT data FROM accessory_stock_movements ORDER BY created_at DESC"
+    );
+    return rows.map((row) => JSON.parse(row.data) as AccessoryStockMovement);
+  }
+
+  async function applyAccessoryStockMovements(
+    movements: AccessoryStockMovement[],
+  ): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found"> {
+    await ready;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<{ data: string }>("SELECT data FROM settings WHERE id = 1 FOR UPDATE");
+      if (!rows[0]) {
+        await client.query("ROLLBACK");
+        return "not_found";
+      }
+
+      const settings = migrateSettings(JSON.parse(rows[0].data));
+      const items = new Map(settings.accessoryMaterials.map((item) => [item.id, item]));
+      if (movements.some((movement) => !items.has(movement.accessoryId))) {
+        await client.query("ROLLBACK");
+        return "not_found";
+      }
+      const keys = movements.flatMap((movement) => movement.referenceKey ? [movement.referenceKey] : []);
+      if (keys.length) {
+        const duplicate = await client.query(
+          "SELECT 1 FROM accessory_stock_movements WHERE reference_key = ANY($1)",
+          [keys]
+        );
+        if (duplicate.rowCount) {
+          await client.query("ROLLBACK");
+          return "duplicate";
+        }
+      }
+      const deltas = new Map<string, number>();
+      for (const movement of movements) {
+        deltas.set(movement.accessoryId, (deltas.get(movement.accessoryId) ?? 0) + movement.quantity);
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta < 0)) {
+        await client.query("ROLLBACK");
+        return "insufficient";
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta > 1_000_000_000)) {
+        await client.query("ROLLBACK");
+        return "limit";
+      }
+      const updatedSettings: AppSettings = {
+        ...settings,
+        accessoryMaterials: settings.accessoryMaterials.map((item) => ({
+          ...item,
+          stockQuantity: item.stockQuantity + (deltas.get(item.id) ?? 0),
+        })),
+      };
+      await client.query("UPDATE settings SET data = $1 WHERE id = 1", [JSON.stringify(updatedSettings)]);
+      for (const movement of movements) {
+        await client.query(
+          "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES ($1, $2, $3, $4, $5)",
+          [movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement)]
+        );
+      }
+      await client.query("COMMIT");
+      return "applied";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function importAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<void> {
+    await ready;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const movement of movements) {
+        await client.query(
+          "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES ($1, $2, $3, $4, $5)",
+          [movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement)]
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
@@ -215,6 +386,8 @@ export function createPostgresStore(connectionString?: string): DataStore {
       await client.query("BEGIN");
       await client.query("DELETE FROM print_models");
       await client.query("DELETE FROM order_items");
+      await client.query("DELETE FROM material_bookings");
+      await client.query("DELETE FROM accessory_stock_movements");
       await client.query("DELETE FROM prints");
       await client.query("DELETE FROM orders");
       await client.query("DELETE FROM settings");
@@ -240,6 +413,18 @@ export function createPostgresStore(connectionString?: string): DataStore {
             order.id, item.printId, item.quantity,
           ]);
         }
+        for (const booking of data.materialBookings) {
+          await client.query(
+            "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES ($1, $2, $3, $4, $5)",
+            [booking.id, booking.printId, booking.createdAt, materialBookingActiveKey(booking), JSON.stringify(booking)]
+          );
+        }
+      }
+      for (const movement of data.accessoryStockMovements) {
+        await client.query(
+          "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES ($1, $2, $3, $4, $5)",
+          [movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement)]
+        );
       }
       await client.query("COMMIT");
     } catch (error) {
@@ -266,7 +451,14 @@ export function createPostgresStore(connectionString?: string): DataStore {
     savePrintCostInputs,
     listOrders,
     saveOrder,
+    saveOrderQueue,
     deleteOrder,
+    listMaterialBookings,
+    createMaterialBooking,
+    saveMaterialBooking,
+    listAccessoryStockMovements,
+    applyAccessoryStockMovements,
+    importAccessoryStockMovements,
     replaceApplicationData,
   };
 }

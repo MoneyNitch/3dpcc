@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- GitHub preference switches save only their two supported fields, so toggling
+  them is no longer rejected because of unrelated general settings.
+- Settings render the changelog as formatted Markdown, with a separate card for
+  each release and Unreleased section. Embedded HTML and automatic image loading
+  are disabled; links open only on explicit interaction.
+- Manual print creation has a refreshed responsive card layout with grouped print
+  details, individual filament cards, a total-weight badge and a clearer image input.
+
+### Added
+- Settings display the bundled changelog or the latest GitHub default-branch
+  changelog and notify about newer stable GitHub releases. Two independently
+  persisted switches control the online features (enabled by default). Disabled
+  features perform no GitHub requests; requests have bounded timeouts and caching.
+- Role cards in user management expose a read-only list of granted permissions,
+  including the predefined Viewer, Admin and Superadmin roles.
+- A bulk stock-update button below quote creation deducts all selected filament
+  spools and accessories for the print after one confirmation. Existing bookings
+  are not repeated; individual results make partial failures explicit.
+- Accessory catalog entries track pack price, units per pack and stock quantity.
+  Stock receipts and corrections are recorded in a persistent movement history;
+  print and order calculators can explicitly deduct saved accessory usage after
+  confirmation. Duplicate deductions and insufficient stock are blocked, and
+  inventory history is included in backups.
+- Order detail history records creation, saved changes and completion timestamps.
+- External spool consumption is recorded in a persistent journal included in backups.
+  Duplicate bookings for the same print and spool are blocked across reloads;
+  uncertain results remain blocked until the external inventory is checked.
+- Confirmed reversals can be recorded in the journal. They are internal-only and do
+  not modify stock in Spoolman or FilaMan.
+- Orders can be assigned to configured printers. The print schedule estimates each
+  queue's occupancy from print duration × quantity and supports manual queue order.
+
 ## v0.8.0 — User management, customer orders and independent order pricing
 
 ### Added

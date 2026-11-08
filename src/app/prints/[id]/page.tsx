@@ -5,6 +5,7 @@ import { requireSetupComplete } from "@/lib/setupGuard";
 import { CostInputsProvider } from "@/lib/costInputsContext";
 import { CostCalculator } from "@/components/CostCalculator";
 import { ExtraCostsCard } from "@/components/ExtraCostsCard";
+import { PrintInventoryAction } from "@/components/PrintInventoryAction";
 import { InvoiceExport } from "@/components/InvoiceExport";
 import { DeletePrintButton } from "@/components/DeletePrintButton";
 import { PrintNameEditor } from "@/components/PrintNameEditor";
@@ -93,13 +94,14 @@ export default async function PrintDetailPage({
 
           <PrintPlateDetails manual={Boolean(print.manual)} languagePacks={settings.customLanguagePacks} />
 
-          <ExtraCostsCard accessoryMaterials={settings.accessoryMaterials} />
+          <ExtraCostsCard accessoryMaterials={settings.accessoryMaterials} printId={print.id} />
         </div>
 
         <div className="min-w-0">
-          <CostCalculator settings={settings} />
+          <CostCalculator printId={print.id} settings={settings} />
           {canDocument && <><InvoiceExport print={print} settings={settings} />
           <InvoiceExport print={print} settings={settings} kind="quote" /></>}
+          <PrintInventoryAction printId={print.id} />
         </div>
       </div>
       </CostInputsProvider>

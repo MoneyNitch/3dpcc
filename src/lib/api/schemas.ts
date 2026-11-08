@@ -14,7 +14,18 @@ export const materialSchema = z.strictObject({
   id: idSchema, name, type: z.string().trim().min(1).max(100), color, pricePerKg: amount,
 });
 export const accessorySchema = z.strictObject({
-  id: idSchema, name, pricePerPack: amount, unitsPerPack: z.number().positive().max(1_000_000),
+  id: idSchema, name, pricePerPack: amount, unitsPerPack: z.number().int().positive().max(1_000_000),
+  stockQuantity: z.number().int().min(0).max(1_000_000_000).default(0),
+});
+export const accessoryStockMovementSchema = z.strictObject({
+  id: idSchema,
+  accessoryId: idSchema,
+  accessoryName: name,
+  quantity: z.number().int().finite().min(-1_000_000_000).max(1_000_000_000).refine((value) => value !== 0),
+  kind: z.enum(["receipt", "adjustment", "consumption"]),
+  reference: name,
+  referenceKey: z.string().max(255).nullable(),
+  createdAt: z.iso.datetime(),
 });
 export const printerSchema = z.strictObject({
   id: idSchema, name, powerConsumptionW: amount, purchasePrice: amount,
@@ -57,6 +68,8 @@ export const settingsSchema = z.strictObject({
     language: z.string().min(2).max(50), currency: z.enum(CURRENCY_CODES),
     enable3dPreview: z.boolean(), retainOriginalArchives: z.boolean().default(false),
     previewComputePercent: z.number().int().min(10).max(100),
+    fetchGithubChangelog: z.boolean().default(true),
+    checkGithubUpdates: z.boolean().default(true),
     companyName: text, companyAddress: text, companyEmail: text, companyPhone: text, companyTaxId: text, companyIban: text,
   }),
   customLanguagePacks: z.array(z.strictObject({
@@ -86,7 +99,10 @@ export const costInputsSchema = z.strictObject({
   externalSpools: z.record(idSchema, externalSpoolSchema),
   quantity: z.number().int().positive().max(1_000_000),
   energyKwhOverride: amount.nullable(),
-  extraCosts: z.array(z.strictObject({ id: idSchema, name, cost: amount, quantity: z.number().positive().max(1_000_000) }))
+  extraCosts: z.array(z.strictObject({
+    id: idSchema, name, cost: amount, quantity: z.number().positive().max(1_000_000),
+    accessoryId: idSchema.optional(),
+  }))
     .max(1000).refine(uniqueIds, "Extra cost IDs must be unique."),
   printerId: idSchema.nullable(),
 });

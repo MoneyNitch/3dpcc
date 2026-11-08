@@ -1,11 +1,42 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { builtInRoles } from "./auth/permissions";
 import {
   createLanguagePackTemplate,
   parseLanguagePack,
   parseLocalizedNumber,
   translate,
 } from "./i18n";
+
+test("built-in role permission details are translated including superadmin user management", () => {
+  for (const language of ["de", "en"]) {
+    const keys = [
+      "auth.viewPermissions", "auth.builtInPermissionsNote", "auth.noPermissions",
+      ...builtInRoles.flatMap((role) => role.permissions.map((permission) => `auth.permission.${permission}`)),
+    ];
+    for (const key of keys) assert.notEqual(translate(language, key), key);
+  }
+});
+
+test("manual print layout labels are translated in both languages", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "manual.title", "manual.subtitle", "manual.hideForm", "manual.basicDetails",
+      "manual.namePlaceholder", "manual.createHint",
+    ]) assert.notEqual(translate(language, key), key);
+  }
+});
+
+test("software privacy, switches and update states are translated", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "software.title", "software.privacy", "software.offline", "software.fetchGithubChangelog",
+      "software.checkGithubUpdates", "software.savedImmediately", "software.changelogFallback",
+      ...["disabled", "available", "current", "no-release", "error"].map((status) => `software.update.${status}`),
+      ...["local", "connection", "cancelled", "response", "rate-limit", "limit", "version"].map((code) => `software.githubError.${code}`),
+    ]) assert.notEqual(translate(language, key), key);
+  }
+});
 
 test("parses custom language packs and falls back to English", () => {
   const pack = parseLanguagePack({
@@ -62,6 +93,38 @@ test("statistics labels are translated in both built-in languages", () => {
       "stats.material",
       "stats.materialBreakdown",
       "stats.note",
+    ]) {
+      assert.notEqual(translate(language, key), key);
+    }
+  }
+});
+
+test("additional cost quantity is translated in both built-in languages", () => {
+  assert.equal(translate("de", "extra.quantity"), "Menge");
+  assert.equal(translate("en", "extra.quantity"), "Quantity");
+});
+
+test("accessory stock management labels are translated in both built-in languages", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "settings.stock",
+      "settings.stockReceive",
+      "settings.stockAdjust",
+      "settings.stockHistory",
+      "accessory.stockBook",
+      "accessory.stockConfirm",
+      "accessory.stockBooked",
+    ]) {
+      assert.notEqual(translate(language, key), key);
+    }
+  }
+});
+
+test("bulk inventory actions and partial outcomes are translated", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "inventory.update", "inventory.confirm", "inventory.hint", "inventory.empty",
+      "inventory.failed", "inventory.booked", "inventory.skipped", "inventory.uncertain", "inventory.rejected",
     ]) {
       assert.notEqual(translate(language, key), key);
     }

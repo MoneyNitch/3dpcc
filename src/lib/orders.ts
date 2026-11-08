@@ -12,6 +12,7 @@ export const orderInputSchema = z.strictObject({
   customerName: z.string().trim().min(1).max(200),
   status: orderStatusSchema,
   priority: orderPrioritySchema.default("normal"),
+  printerId: z.string().trim().min(1).max(128).nullable().default(null),
   dueDate: z.iso.date().nullable(),
   notes: z.string().max(5000),
   items: z.array(z.strictObject({

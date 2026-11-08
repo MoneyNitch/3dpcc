@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import type {
   AccessoryMaterial,
+  AccessoryStockMovement,
   AppSettings,
   Currency,
   Language,
@@ -23,10 +24,12 @@ import { getCurrencyOptions } from "@/lib/currency";
 import packageJson from "../../package.json";
 import { PreviewQueueSettings } from "./PreviewQueueSettings";
 import { SupportExport } from "./SupportExport";
+import { SoftwareSettings } from "./SoftwareSettings";
+import type { SoftwareInfo } from "@/lib/softwareUpdates";
 import { useAuth } from "@/lib/auth/context";
 import { hasPermission } from "@/lib/auth/permissions";
 
-export type SettingsTab = "general" | "support" | "database" | "filaments" | "users" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
+export type SettingsTab = "general" | "software" | "support" | "database" | "filaments" | "users" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
 
 type ImportedPrinterProfile = Omit<PrinterProfile, "id">;
 
@@ -81,8 +84,9 @@ function parsePrinterProfileExport(value: unknown): ImportedPrinterProfile[] | n
   return printers;
 }
 
-export function SettingsForm({ initialSettings, databaseSettings, filamentSettings, userSettings, initialTab = "general" }: {
+export function SettingsForm({ initialSettings, initialAccessoryStockMovements, databaseSettings, filamentSettings, userSettings, initialTab = "general" }: {
   initialSettings: AppSettings;
+  initialAccessoryStockMovements: AccessoryStockMovement[];
   databaseSettings: ReactNode;
   filamentSettings: ReactNode;
   userSettings?: ReactNode;
@@ -93,6 +97,10 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
   const { enabled, user } = useAuth();
   const can = (permission: Parameters<typeof hasPermission>[1]) => hasPermission(user, permission, enabled);
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
+  const [softwareInfo, setSoftwareInfo] = useState<SoftwareInfo | null>(null);
+  const [accessoryStockMovements, setAccessoryStockMovements] = useState(initialAccessoryStockMovements);
+  const [stockQuantityDrafts, setStockQuantityDrafts] = useState<Record<string, string>>({});
+  const [stockMessage, setStockMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
@@ -117,6 +125,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     parseLocalizedNumber(value, lang) || 0;
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "software", label: t("software.title") },
     { id: "materials", label: t("settings.materials") },
     { id: "printers", label: t("settings.printers") },
     { id: "costs", label: t("settings.costsTitle") },
@@ -176,7 +185,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
       ...s,
       accessoryMaterials: [
         ...s.accessoryMaterials,
-        { id: randomUUID(), name: t("settings.newAccessory"), pricePerPack: 1, unitsPerPack: 1 },
+        { id: randomUUID(), name: t("settings.newAccessory"), pricePerPack: 1, unitsPerPack: 1, stockQuantity: 0 },
       ],
     }));
     setSaved(false);
@@ -188,6 +197,34 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
       accessoryMaterials: s.accessoryMaterials.filter((item) => item.id !== id),
     }));
     setSaved(false);
+  }
+
+  async function changeAccessoryStock(item: AccessoryMaterial, action: "receipt" | "adjustment") {
+    const quantity = Number(stockQuantityDrafts[item.id]);
+    if (!Number.isSafeInteger(quantity) || quantity === 0 || (action === "receipt" && quantity < 1)) {
+      setStockMessage(t("settings.stockInvalid"));
+      return;
+    }
+    setStockMessage(null);
+    try {
+      const response = await fetch("/api/accessory-stock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, accessoryId: item.id, quantity }),
+      });
+      const body: { error?: string; accessories?: AccessoryMaterial[]; movements?: AccessoryStockMovement[] } =
+        await response.json();
+      if (!response.ok || !body.accessories || !body.movements) {
+        throw new Error(body.error ?? t("settings.stockSaveFailed"));
+      }
+      setSettings((current) => ({ ...current, accessoryMaterials: body.accessories! }));
+      setAccessoryStockMovements(body.movements);
+      setStockQuantityDrafts((current) => ({ ...current, [item.id]: "" }));
+      setStockMessage(t("settings.stockSaved"));
+    } catch (error) {
+      console.error("Could not update accessory stock:", error);
+      setStockMessage(error instanceof Error ? error.message : t("settings.stockSaveFailed"));
+    }
   }
 
   function updatePrinter(id: string, patch: Partial<PrinterProfile>) {
@@ -396,6 +433,13 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
   return (
     <div className="flex flex-col gap-6">
       {saveError && <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{t("settings.saveFailed")}</p>}
+      {softwareInfo?.update.status === "available" && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-300 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-950/30">
+          <p className="text-sm font-semibold text-orange-800 dark:text-orange-200">{t("software.update.available", { version: softwareInfo.update.version ?? "" })}</p>
+          <button type="button" onClick={() => setActiveTab("software")}
+            className="text-sm font-medium text-orange-700 underline dark:text-orange-300">{t("software.showDetails")}</button>
+        </div>
+      )}
       <div role="tablist" aria-label={t("settings.title")} className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700">
         {tabs.filter((tab) =>
           tab.id === "database" ? can("database.manage") :
@@ -459,6 +503,12 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
         {userSettings}
       </div>
 
+      <div id="software-settings-panel" role="tabpanel" aria-labelledby="software-settings-tab" hidden={activeTab !== "software"}>
+        <SoftwareSettings initialPreferences={initialSettings.general} onInfo={setSoftwareInfo}
+          onPreferencesSaved={(preferences) => {
+            setSettings((current) => ({ ...current, general: { ...current.general, ...preferences } }));
+          }} />
+      </div>
       <fieldset disabled={!can(activeTab === "numbering" ? "documents.write" : "settings.write")} className="contents">
       <section
         id="general-settings-panel"
@@ -723,9 +773,11 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
                     pricePerPack: parseDecimal(e.target.value),
                   })
                 }
+                aria-label={`${t("settings.pricePerPack")}: ${item.name}`}
                 className={`w-24 ${textInputClass}`}
               />
               <span className="text-xs text-slate-400 dark:text-slate-500">{unit}</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500">{t("settings.pricePerPack")}</span>
               <input
                 type="number"
                 min={1}
@@ -734,6 +786,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
                 onChange={(e) =>
                   updateAccessoryMaterial(item.id, { unitsPerPack: parseInt(e.target.value, 10) || 1 })
                 }
+                aria-label={`${t("settings.unitsPerPack")}: ${item.name}`}
                 className={`w-20 ${textInputClass}`}
               />
               <span className="text-xs text-slate-400 dark:text-slate-500">{t("settings.unitsPerPack")}</span>
@@ -744,15 +797,63 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
                   maximumFractionDigits: 3,
                 }).format(item.pricePerPack / Math.max(1, item.unitsPerPack))}
               </span>
+              <span className={`text-xs font-medium ${item.stockQuantity === 0 ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300"}`}>
+                {t("settings.stock")}: {item.stockQuantity} {t("extra.unit")}
+              </span>
+              <input
+                type="number"
+                step="1"
+                value={stockQuantityDrafts[item.id] ?? ""}
+                onChange={(event) => setStockQuantityDrafts((current) => ({
+                  ...current,
+                  [item.id]: event.target.value,
+                }))}
+                aria-label={`${t("settings.stockChange")}: ${item.name}`}
+                className={`w-20 ${textInputClass}`}
+              />
+              <button
+                type="button"
+                onClick={() => void changeAccessoryStock(item, "receipt")}
+                className="rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
+              >
+                {t("settings.stockReceive")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void changeAccessoryStock(item, "adjustment")}
+                className="rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
+              >
+                {t("settings.stockAdjust")}
+              </button>
               <button
                 onClick={() => removeAccessoryMaterial(item.id)}
-                className="ml-auto text-xs font-medium text-red-500 hover:underline dark:text-red-400"
+                disabled={item.stockQuantity > 0}
+                title={item.stockQuantity > 0 ? t("settings.stockMustBeEmpty") : undefined}
+                className="ml-auto text-xs font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
               >
                 {t("extra.remove")}
               </button>
             </div>
           ))}
         </div>
+        {stockMessage && <p role="status" className="mt-3 text-sm text-slate-600 dark:text-slate-300">{stockMessage}</p>}
+        {accessoryStockMovements.length > 0 && (
+          <div className="mt-5">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("settings.stockHistory")}</h3>
+          <div className="mt-2 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+            {accessoryStockMovements.slice(0, 20).map((movement) => (
+              <div key={movement.id} className="flex flex-wrap justify-between gap-x-4 py-2 text-xs">
+                <span className="text-slate-700 dark:text-slate-200">
+                  {movement.accessoryName} · {movement.reference}
+                </span>
+                <span className={movement.quantity < 0 ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}>
+                  {movement.quantity > 0 ? "+" : ""}{movement.quantity} · {new Date(movement.createdAt).toLocaleString(getIntlLocale(lang))}
+                </span>
+              </div>
+            ))}
+          </div>
+          </div>
+        )}
         <button
           onClick={addAccessoryMaterial}
           className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"

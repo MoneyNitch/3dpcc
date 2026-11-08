@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError } from "@/lib/api/http";
-import { deleteOrder, listPrints, listOrders, saveOrder } from "@/lib/db";
+import { deleteOrder, getSettings, listPrints, listOrders, saveOrder } from "@/lib/db";
 import { authorize } from "@/lib/auth/server";
 import { orderInputSchema, orderQuickUpdateSchema, readOrderBody } from "@/lib/orders";
 import { orderGcodeFiles } from "@/lib/orderGcode";
@@ -36,8 +36,8 @@ export async function PATCH(
     ...parsed.data,
     updatedAt: new Date().toISOString(),
   };
-  await saveOrder(updated);
-  return NextResponse.json({ order: updated }, { headers: { "Cache-Control": "private, no-store" } });
+  const saved = await saveOrder(updated);
+  return NextResponse.json({ order: saved }, { headers: { "Cache-Control": "private, no-store" } });
 }
 
 export async function PUT(
@@ -62,20 +62,24 @@ export async function PUT(
   if (!parsed.success) {
     return NextResponse.json({ error: "Bitte prüfe Kunde, Status und Druckpositionen." }, { status: 400 });
   }
-  const [existing, prints] = await Promise.all([listOrders(), listPrints()]);
+  const [existing, prints, settings] = await Promise.all([listOrders(), listPrints(), getSettings()]);
   const order = existing.find((item) => item.id === id);
   if (!order) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
   const printIds = new Set(prints.map((print) => print.id));
   if (parsed.data.items.some((item) => !printIds.has(item.printId))) {
     return NextResponse.json({ error: "Mindestens ein zugeordneter Druck wurde nicht gefunden." }, { status: 400 });
   }
+  if (parsed.data.printerId && !settings.printers.some((printer) => printer.id === parsed.data.printerId)) {
+    return NextResponse.json({ error: "Der ausgewählte Drucker wurde nicht gefunden." }, { status: 400 });
+  }
   const updated: PrintOrder = {
     ...order,
     ...parsed.data,
+    queuePosition: parsed.data.printerId === (order.printerId ?? null) ? order.queuePosition : undefined,
     updatedAt: new Date().toISOString(),
   };
-  await saveOrder(updated);
-  return NextResponse.json({ order: updated }, { headers: { "Cache-Control": "private, no-store" } });
+  const saved = await saveOrder(updated);
+  return NextResponse.json({ order: saved }, { headers: { "Cache-Control": "private, no-store" } });
 }
 
 export async function DELETE(

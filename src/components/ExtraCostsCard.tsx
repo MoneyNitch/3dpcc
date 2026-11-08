@@ -1,23 +1,31 @@
 "use client";
 
 import { useState } from "react";
+import { usePermission } from "@/lib/auth/context";
 import { useCostInputs } from "@/lib/costInputsContext";
 import { randomUUID } from "@/lib/clientId";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol, getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
 import type { AccessoryMaterial } from "@/lib/types";
 import { Modal } from "./Modal";
+import { AccessoryStockAction } from "./AccessoryStockAction";
 
-export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: AccessoryMaterial[] }) {
-  const { inputs, update, save, saved, saveError } = useCostInputs();
+export function ExtraCostsCard({ accessoryMaterials, printId }: { accessoryMaterials: AccessoryMaterial[]; printId: string }) {
+  const {
+    inputs, update, save, saved, saveError, accessoryStock, inventoryChanged, inventoryBusy, setInventoryBusy,
+  } = useCostInputs();
   const { t, money, currency, lang } = useLocale();
+  const canBookStock = usePermission("prints.write");
+  const availableAccessories = accessoryStock ?? accessoryMaterials;
+  const [selectedAccessoryId, setSelectedAccessoryId] = useState<string | undefined>();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [cost, setCost] = useState("");
   const [quantity, setQuantity] = useState("1");
 
   function selectAccessory(id: string) {
-    const item = accessoryMaterials.find((accessory) => accessory.id === id);
+    setSelectedAccessoryId(id || undefined);
+    const item = availableAccessories.find((accessory) => accessory.id === id);
     if (!item) return;
     setName(item.name);
     setCost(
@@ -38,11 +46,13 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
         name: name.trim(),
         cost: parsedCost,
         quantity: Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1,
+        ...(selectedAccessoryId ? { accessoryId: selectedAccessoryId } : {}),
       },
     ]);
     setName("");
     setCost("");
     setQuantity("1");
+    setSelectedAccessoryId(undefined);
     setIsModalOpen(false);
   }
 
@@ -122,11 +132,22 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
         {saved ? t("extra.saved") : t("extra.save")}
       </button>
       {saveError && <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">{t("cost.saveError")}</p>}
+      {inputs.extraCosts.some((item) => item.accessoryId) && (
+        <AccessoryStockAction
+          source="print"
+          sourceId={printId}
+          canBook={canBookStock}
+          beforeBook={save}
+          onBooked={inventoryChanged}
+          disabled={inventoryBusy}
+          onBusyChange={setInventoryBusy}
+        />
+      )}
 
       {isModalOpen && (
         <Modal title={t("extra.modalTitle")} onClose={() => setIsModalOpen(false)}>
           <div className="flex flex-col gap-3">
-            {accessoryMaterials.length > 0 && (
+            {availableAccessories.length > 0 && (
               <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
                 {t("extra.selectAccessory")}
                 <select
@@ -135,9 +156,9 @@ export function ExtraCostsCard({ accessoryMaterials }: { accessoryMaterials: Acc
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                 >
                   <option value="">{t("extra.manualEntry")}</option>
-                  {accessoryMaterials.map((item) => (
+                  {availableAccessories.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.name} ({money(item.pricePerPack / Math.max(1, item.unitsPerPack))}/{t("extra.unit")})
+                  {item.name} ({money(item.pricePerPack / Math.max(1, item.unitsPerPack))}/{t("extra.unit")}, {t("settings.stock")}: {item.stockQuantity})
                     </option>
                   ))}
                 </select>

@@ -6,14 +6,35 @@ import { useLocale } from "@/lib/locale";
 import { getIntlLocale } from "@/lib/i18n";
 import type { OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
 import type { OrderInput } from "@/lib/orders";
+import { formatDuration, orderDurationSeconds, sortPrintQueue } from "@/lib/orderPlanning";
 import {
   defaultOrderFilters, dueFilters, filterOrders, isOrderOverdue, localDateKey, type OrderFilters,
 } from "@/lib/orderFilters";
 
-type PrintOption = { id: string; name: string };
+type PrintOption = { id: string; name: string; durationSeconds: number | null };
+type PrinterOption = { id: string; name: string };
 type Draft = OrderInput;
 const sortFields = ["priority", "dueDate", "customer", "status", "createdAt"] as const;
 const sortDirections = ["asc", "desc"] as const;
+const hiddenPrintersStorageKey = "3dpcc:orders:hidden-printers";
+const printerVisibilityEvent = "3dpcc:printer-visibility";
+
+function subscribeToPrinterVisibility(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(printerVisibilityEvent, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(printerVisibilityEvent, onChange);
+  };
+}
+
+function getPrinterVisibilitySnapshot() {
+  try {
+    return window.localStorage.getItem(hiddenPrintersStorageKey) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
 
 function subscribeToDateChange(onChange: () => void) {
   const timer = setInterval(onChange, 60_000);
@@ -24,6 +45,7 @@ const emptyDraft: Draft = {
   customerName: "",
   status: "open",
   priority: "normal",
+  printerId: null,
   dueDate: null,
   notes: "",
   items: [],
@@ -34,6 +56,7 @@ function draftFromOrder(order: PrintOrder): Draft {
     customerName: order.customerName,
     status: order.status,
     priority: order.priority ?? "normal",
+    printerId: order.printerId ?? null,
     dueDate: order.dueDate,
     notes: order.notes,
     items: order.items.map((item) => ({ ...item })),
@@ -43,12 +66,14 @@ function draftFromOrder(order: PrintOrder): Draft {
 export function OrderManager({
   initialOrders,
   prints,
+  printers,
   canEdit,
   initialEditingOrderId,
   initialToday,
 }: {
   initialOrders: PrintOrder[];
   prints: PrintOption[];
+  printers: PrinterOption[];
   canEdit: boolean;
   initialEditingOrderId?: string;
   initialToday: string;
@@ -63,6 +88,7 @@ export function OrderManager({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const printNames = new Map(prints.map((print) => [print.id, print.name]));
+  const printerNames = new Map(printers.map((printer) => [printer.id, printer.name]));
   const inputClass =
     "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
   const sortSelectClass =
@@ -72,9 +98,44 @@ export function OrderManager({
   const [sortField, setSortField] = useState<(typeof sortFields)[number]>("priority");
   const [sortDirection, setSortDirection] = useState<(typeof sortDirections)[number]>("desc");
   const [filters, setFilters] = useState<OrderFilters>(defaultOrderFilters);
+  const hiddenPrintersSnapshot = useSyncExternalStore(
+    subscribeToPrinterVisibility,
+    getPrinterVisibilitySnapshot,
+    () => "[]",
+  );
+  const hiddenPrinterIds = (() => {
+    try {
+      const parsed: unknown = JSON.parse(hiddenPrintersSnapshot);
+      if (!Array.isArray(parsed) || !parsed.every((id): id is string => typeof id === "string")) return [];
+      const printerIds = new Set(printers.map((printer) => printer.id));
+      return parsed.filter((id) => printerIds.has(id));
+    } catch (error) {
+      console.error("Could not parse printer visibility preference:", error);
+      return [];
+    }
+  })();
+
+  function setPrinterVisibility(printerId: string, visible: boolean) {
+    const updated = visible
+      ? hiddenPrinterIds.filter((id) => id !== printerId)
+      : [...hiddenPrinterIds, printerId];
+    try {
+      window.localStorage.setItem(hiddenPrintersStorageKey, JSON.stringify(updated));
+      window.dispatchEvent(new Event(printerVisibilityEvent));
+      setMessage(null);
+    } catch (error) {
+      console.error("Could not save printer visibility preference:", error);
+      setMessage({ type: "error", text: t("orders.queue.visibilitySaveFailed") });
+    }
+  }
   const today = useSyncExternalStore(subscribeToDateChange,
     () => localDateKey(new Date()), () => initialToday);
   const priorityRank: Record<OrderPriority, number> = { low: 0, normal: 1, high: 2 };
+  const activeQueueOrders = orders.filter((order) =>
+    order.status !== "completed" && order.status !== "cancelled");
+  const queueForPrinter = (printerId: string) =>
+    sortPrintQueue(activeQueueOrders.filter((order) => order.printerId === printerId));
+  const unassignedQueue = sortPrintQueue(activeQueueOrders.filter((order) => !order.printerId));
   const sortedOrders = filterOrders(orders, filters, today).sort((left, right) => {
     let comparison = 0;
     switch (sortField) {
@@ -243,6 +304,33 @@ export function OrderManager({
     }
   }
 
+  async function moveQueueOrder(printerId: string, queue: PrintOrder[], index: number, direction: -1 | 1) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= queue.length) return;
+    const reordered = [...queue];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/orders/queue", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ printerId, orderIds: reordered.map((order) => order.id) }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? t("orders.queue.saveFailed"));
+      setOrders(body.orders as PrintOrder[]);
+      setMessage({ type: "success", text: t("orders.queue.saved") });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : t("orders.queue.saveFailed"),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function addItem() {
     const alreadySelected = new Set(draft.items.map((item) => item.printId));
     const next = prints.find((print) => !alreadySelected.has(print.id));
@@ -304,6 +392,14 @@ export function OrderManager({
                   if (priority) setDraft((current) => ({ ...current, priority }));
                 }}>
                 {priorityOptions.map((priority) => <option key={priority} value={priority}>{t(`orders.priority.${priority}`)}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+              {t("orders.queue.printer")}
+              <select className={inputClass} value={draft.printerId ?? ""}
+                onChange={(event) => setDraft((current) => ({ ...current, printerId: event.target.value || null }))}>
+                <option value="">{t("orders.queue.unassigned")}</option>
+                {printers.map((printer) => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
               </select>
             </label>
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
@@ -378,6 +474,87 @@ export function OrderManager({
             </button>
           </div>
         </form>
+      )}
+
+      {!formOpen && (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <h2 className="text-lg font-semibold">{t("orders.queue.title")}</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("orders.queue.rule")}</p>
+          {printers.length > 0 && <fieldset className="mt-4">
+            <legend className="text-sm font-medium">{t("orders.queue.visiblePrinters")}</legend>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+              {printers.map((printer) => (
+                <label key={printer.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={!hiddenPrinterIds.includes(printer.id)}
+                    onChange={(event) => setPrinterVisibility(printer.id, event.target.checked)} />
+                  {printer.name}
+                </label>
+              ))}
+            </div>
+          </fieldset>}
+          <div className="mt-4 grid gap-4">
+            {printers.map((printer) => {
+              if (hiddenPrinterIds.includes(printer.id)) return null;
+              const queue = queueForPrinter(printer.id);
+              const durations = queue.map((order) => orderDurationSeconds(order, prints));
+              const totalSeconds = durations.every((seconds): seconds is number => seconds !== null)
+                ? durations.reduce((total, seconds) => total + seconds, 0)
+                : null;
+              return (
+                <section key={printer.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <h3 className="font-semibold">{printer.name}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      {t("orders.queue.occupied", {
+                        duration: queue.length ? (totalSeconds === null ? t("orders.queue.unknown") : formatDuration(totalSeconds)) : formatDuration(0),
+                      })}
+                    </p>
+                  </div>
+                  {queue.length === 0 ? <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    {t("orders.queue.empty")}
+                  </p> : <ol className="mt-3 flex flex-col gap-2">
+                    {queue.map((order, index) => {
+                      const duration = orderDurationSeconds(order, prints);
+                      return (
+                        <li key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 p-3 text-sm dark:bg-slate-900">
+                          <div>
+                            <span className="mr-2 font-semibold">{index + 1}.</span>
+                            <Link href={`/orders/${order.id}`} className="font-medium hover:text-orange-600 hover:underline dark:hover:text-orange-400">{order.customerName}</Link>
+                            {index === 0 && <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-950 dark:text-orange-200">
+                              {t("orders.queue.next")}
+                            </span>}
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              {order.items.map((item) => `${item.quantity} × ${printNames.get(item.printId) ?? t("orders.missingPrint")}`).join(", ")}
+                              {" · "}{t("orders.queue.estimated", {
+                                duration: duration === null ? t("orders.queue.unknown") : formatDuration(duration),
+                              })}
+                            </p>
+                          </div>
+                          {canEdit && <div className="flex gap-1">
+                            <button type="button" aria-label={t("orders.queue.moveUp")} title={t("orders.queue.moveUp")}
+                              disabled={busy || index === 0} onClick={() => void moveQueueOrder(printer.id, queue, index, -1)}
+                              className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40 dark:border-slate-600">↑</button>
+                            <button type="button" aria-label={t("orders.queue.moveDown")} title={t("orders.queue.moveDown")}
+                              disabled={busy || index === queue.length - 1} onClick={() => void moveQueueOrder(printer.id, queue, index, 1)}
+                              className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40 dark:border-slate-600">↓</button>
+                          </div>}
+                        </li>
+                      );
+                    })}
+                  </ol>}
+                </section>
+              );
+            })}
+            {unassignedQueue.length > 0 && <section className="rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700">
+              <h3 className="font-semibold">{t("orders.queue.unassigned")}</h3>
+              <ul className="mt-2 flex flex-col gap-2 text-sm">
+                {unassignedQueue.map((order) => <li key={order.id}>
+                  <Link href={`/orders/${order.id}`} className="hover:text-orange-600 hover:underline dark:hover:text-orange-400">{order.customerName}</Link>
+                </li>)}
+              </ul>
+            </section>}
+          </div>
+        </section>
       )}
 
       {orders.length === 0 ? (
@@ -512,6 +689,9 @@ export function OrderManager({
                           {t("orders.dueDate")}: {new Intl.DateTimeFormat(getIntlLocale(lang)).format(new Date(`${order.dueDate}T00:00:00`))}
                         </span>
                       )}
+                      {order.printerId && <span>
+                        {t("orders.queue.printer")}: {printerNames.get(order.printerId) ?? t("orders.queue.unknownPrinter")}
+                      </span>}
                       {isOrderOverdue(order, today) && (
                         <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-800 dark:bg-red-900 dark:text-red-100">
                           {t("orders.overdue")}

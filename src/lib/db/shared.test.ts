@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultSettings, migrateSettings } from "./shared";
+import { defaultSettings, migrateSettings, preserveAccessoryStock } from "./shared";
 
 test("enables 3D previews by default", () => {
   assert.equal(defaultSettings.general.enable3dPreview, true);
+});
+
+test("GitHub functions default to enabled but disabled choices persist through migration", () => {
+  const legacy = migrateSettings({ ...defaultSettings, general: { language: "de", currency: "EUR" } });
+  assert.equal(legacy.general.fetchGithubChangelog, true);
+  assert.equal(legacy.general.checkGithubUpdates, true);
+  const disabled = migrateSettings(JSON.parse(JSON.stringify({
+    ...defaultSettings,
+    general: { ...defaultSettings.general, fetchGithubChangelog: false, checkGithubUpdates: false },
+  })));
+  assert.equal(disabled.general.fetchGithubChangelog, false);
+  assert.equal(disabled.general.checkGithubUpdates, false);
 });
 
 test("migrates older settings without changing language or currency", () => {
@@ -65,4 +77,26 @@ test("preserves supported currencies and repairs invalid currency settings", () 
 test("migrates settings without custom language packs", () => {
   const settings = migrateSettings({ ...defaultSettings, customLanguagePacks: undefined });
   assert.deepEqual(settings.customLanguagePacks, []);
+});
+
+test("migrates legacy accessories with zero stock and preserves inventory outside settings edits", () => {
+  const legacy = migrateSettings({
+    ...defaultSettings,
+    accessoryMaterials: [{ id: "clips", name: "Clips", pricePerPack: 4, unitsPerPack: 20 }],
+  });
+  assert.equal(legacy.accessoryMaterials[0].stockQuantity, 0);
+
+  const current = {
+    ...legacy,
+    accessoryMaterials: [{ ...legacy.accessoryMaterials[0], stockQuantity: 12 }],
+  };
+  const edited = {
+    ...current,
+    accessoryMaterials: [
+      { ...current.accessoryMaterials[0], name: "Binder clips", stockQuantity: 999 },
+      { id: "new", name: "New item", pricePerPack: 1, unitsPerPack: 1, stockQuantity: 999 },
+    ],
+  };
+  const saved = preserveAccessoryStock(edited, current);
+  assert.deepEqual(saved.accessoryMaterials.map((item) => item.stockQuantity), [12, 0]);
 });

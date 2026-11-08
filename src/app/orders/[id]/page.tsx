@@ -3,7 +3,7 @@ import { z } from "zod";
 import { OrderDetail } from "@/components/OrderDetail";
 import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
-import { listOrders, getSettings } from "@/lib/db";
+import { getPrintCostInputs, listOrders, getSettings } from "@/lib/db";
 import { loadOrderCalculation } from "@/lib/orderCalculationServer";
 import { requireSetupComplete } from "@/lib/setupGuard";
 
@@ -18,6 +18,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const order = orders.find((item) => item.id === id);
   if (!order) notFound();
   const snapshot = order.calculation ?? await loadOrderCalculation(order);
+  const hasAccessoryStockItems = (await Promise.all(order.items.map(async (item) =>
+    (await getPrintCostInputs(item.printId))?.extraCosts.some((cost) => cost.accessoryId) ?? false
+  ))).some(Boolean);
   return <OrderDetail key={order.updatedAt} initialOrder={order} initialSnapshot={snapshot}
-    canEdit={hasPermission(user, "documents.write", authEnabled())} />;
+    canEdit={hasPermission(user, "documents.write", authEnabled())} hasAccessoryStockItems={hasAccessoryStockItems} />;
 }

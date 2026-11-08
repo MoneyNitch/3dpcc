@@ -55,15 +55,28 @@ export async function PUT(req: NextRequest) {
   if (body?.general?.retainOriginalArchives !== undefined && typeof body.general.retainOriginalArchives !== "boolean") {
     return NextResponse.json({ error: "Die Aufbewahrung von Originalarchiven muss aktiviert oder deaktiviert sein." }, { status: 400 });
   }
+  for (const field of ["fetchGithubChangelog", "checkGithubUpdates"] as const) {
+    if (body?.general?.[field] !== undefined && typeof body.general[field] !== "boolean") {
+      return NextResponse.json({ error: "Die GitHub-Funktionen müssen aktiviert oder deaktiviert sein." }, { status: 400 });
+    }
+  }
   const duty = body?.general?.previewComputePercent;
   if (duty !== undefined && (typeof duty !== "number" || !Number.isInteger(duty) || duty < 10 || duty > 100)) {
     return NextResponse.json({ error: "Die Hintergrund-Rechenleistung muss zwischen 10 und 100 liegen." }, { status: 400 });
   }
   const next = migrateSettings(body);
+  const currentSettings = await getSettings();
+  const retainedAccessoryIds = new Set(next.accessoryMaterials.map((item) => item.id));
+  if (currentSettings.accessoryMaterials.some((item) =>
+    item.stockQuantity > 0 && !retainedAccessoryIds.has(item.id)
+  )) {
+    return NextResponse.json({
+      error: "Zubehör mit vorhandenem Lagerbestand kann nicht entfernt werden. Buche den Bestand vorher aus.",
+    }, { status: 409 });
+  }
   if (authEnabled()) {
     const user = await requestIdentity(req, true);
-    const current = await getSettings();
-    if (!canUpdateSettings(user, current, next)) {
+    if (!canUpdateSettings(user, currentSettings, next)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
   }

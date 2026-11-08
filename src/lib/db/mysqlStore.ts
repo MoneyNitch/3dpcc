@@ -1,6 +1,6 @@
 import mysql from "mysql2/promise";
-import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
-import { defaultSettings, migrateSettings, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
+import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { defaultSettings, materialBookingActiveKey, migrateSettings, preserveAccessoryStock, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 async function ensureSchema(pool: mysql.Pool): Promise<void> {
   await pool.query(`
@@ -41,6 +41,24 @@ async function ensureSchema(pool: mysql.Pool): Promise<void> {
       CONSTRAINT order_items_print_fk FOREIGN KEY (print_id) REFERENCES prints(id) ON DELETE RESTRICT
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS material_bookings (
+      id VARCHAR(64) PRIMARY KEY,
+      print_id VARCHAR(64) NOT NULL,
+      created_at VARCHAR(64) NOT NULL,
+      active_key VARCHAR(64) UNIQUE,
+      data LONGTEXT NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS accessory_stock_movements (
+      id VARCHAR(64) PRIMARY KEY,
+      accessory_id VARCHAR(100) NOT NULL,
+      created_at VARCHAR(64) NOT NULL,
+      reference_key VARCHAR(255) UNIQUE,
+      data LONGTEXT NOT NULL
+    )
+  `);
 }
 
 /** MySQL / MariaDB backend. Pass an explicit connection string, or omit to read DATABASE_URL. */
@@ -68,10 +86,24 @@ export function createMysqlStore(connectionString?: string): DataStore {
 
   async function saveSettings(settings: AppSettings): Promise<void> {
     await ready;
-    await pool.query(
-      "INSERT INTO settings (id, data) VALUES (1, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
-      [JSON.stringify(settings)]
-    );
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [rows] = await connection.query<mysql.RowDataPacket[]>(
+        "SELECT data FROM settings WHERE id = 1 FOR UPDATE"
+      );
+      const next = rows[0] ? preserveAccessoryStock(settings, migrateSettings(JSON.parse(rows[0].data))) : settings;
+      await connection.query(
+        "INSERT INTO settings (id, data) VALUES (1, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
+        [JSON.stringify(next)]
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -205,9 +237,152 @@ export function createMysqlStore(connectionString?: string): DataStore {
     }
   }
 
+  async function saveOrderQueue(orders: PrintOrder[]): Promise<void> {
+    await ready;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      for (const order of orders) {
+        const [result] = await connection.query<mysql.ResultSetHeader>(
+          "UPDATE orders SET updated_at = ?, data = ? WHERE id = ?",
+          [order.updatedAt, JSON.stringify(order), order.id]
+        );
+        if (result.affectedRows !== 1) throw new Error("Auftrag nicht gefunden.");
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
   async function deleteOrder(id: string): Promise<void> {
     await ready;
     await pool.query("DELETE FROM orders WHERE id = ?", [id]);
+  }
+
+  async function listMaterialBookings(printId?: string): Promise<MaterialBooking[]> {
+    await ready;
+    const [rows] = printId
+      ? await pool.query<mysql.RowDataPacket[]>("SELECT data FROM material_bookings WHERE print_id = ? ORDER BY created_at DESC", [printId])
+      : await pool.query<mysql.RowDataPacket[]>("SELECT data FROM material_bookings ORDER BY created_at DESC");
+    return rows.map((row) => JSON.parse(row.data) as MaterialBooking);
+  }
+
+  async function createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean> {
+    await ready;
+    const [result] = await pool.query<mysql.ResultSetHeader>(
+      "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+      [booking.id, booking.printId, booking.createdAt, activeKey, JSON.stringify(booking)]
+    );
+    return result.affectedRows === 1;
+  }
+
+  async function saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void> {
+    await ready;
+    const [result] = await pool.query<mysql.ResultSetHeader>(
+      "UPDATE material_bookings SET active_key = ?, data = ? WHERE id = ?",
+      [activeKey, JSON.stringify(booking), booking.id]
+    );
+    if (result.affectedRows !== 1) throw new Error("Materialbuchung nicht gefunden.");
+  }
+
+  async function listAccessoryStockMovements(): Promise<AccessoryStockMovement[]> {
+    await ready;
+    const [rows] = await pool.query<mysql.RowDataPacket[]>(
+      "SELECT data FROM accessory_stock_movements ORDER BY created_at DESC"
+    );
+    return rows.map((row) => JSON.parse(row.data) as AccessoryStockMovement);
+  }
+
+  async function applyAccessoryStockMovements(
+    movements: AccessoryStockMovement[],
+  ): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found"> {
+    await ready;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [rows] = await connection.query<mysql.RowDataPacket[]>(
+        "SELECT data FROM settings WHERE id = 1 FOR UPDATE"
+      );
+      if (!rows[0]) {
+        await connection.rollback();
+        return "not_found";
+      }
+
+      const settings = migrateSettings(JSON.parse(rows[0].data));
+      const items = new Map(settings.accessoryMaterials.map((item) => [item.id, item]));
+      if (movements.some((movement) => !items.has(movement.accessoryId))) {
+        await connection.rollback();
+        return "not_found";
+      }
+      const keys = movements.flatMap((movement) => movement.referenceKey ? [movement.referenceKey] : []);
+      if (keys.length) {
+        const [duplicates] = await connection.query<mysql.RowDataPacket[]>(
+          `SELECT 1 FROM accessory_stock_movements WHERE reference_key IN (${keys.map(() => "?").join(",")}) LIMIT 1`,
+          keys
+        );
+        if (duplicates.length) {
+          await connection.rollback();
+          return "duplicate";
+        }
+      }
+      const deltas = new Map<string, number>();
+      for (const movement of movements) {
+        deltas.set(movement.accessoryId, (deltas.get(movement.accessoryId) ?? 0) + movement.quantity);
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta < 0)) {
+        await connection.rollback();
+        return "insufficient";
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta > 1_000_000_000)) {
+        await connection.rollback();
+        return "limit";
+      }
+      const updatedSettings: AppSettings = {
+        ...settings,
+        accessoryMaterials: settings.accessoryMaterials.map((item) => ({
+          ...item,
+          stockQuantity: item.stockQuantity + (deltas.get(item.id) ?? 0),
+        })),
+      };
+      await connection.query("UPDATE settings SET data = ? WHERE id = 1", [JSON.stringify(updatedSettings)]);
+      for (const movement of movements) {
+        await connection.query(
+          "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)",
+          [movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement)]
+        );
+      }
+      await connection.commit();
+      return "applied";
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async function importAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<void> {
+    await ready;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      for (const movement of movements) {
+        await connection.query(
+          "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)",
+          [movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement)]
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
@@ -217,6 +392,8 @@ export function createMysqlStore(connectionString?: string): DataStore {
       await connection.beginTransaction();
       await connection.query("DELETE FROM print_models");
       await connection.query("DELETE FROM order_items");
+      await connection.query("DELETE FROM material_bookings");
+      await connection.query("DELETE FROM accessory_stock_movements");
       await connection.query("DELETE FROM prints");
       await connection.query("DELETE FROM orders");
       await connection.query("DELETE FROM settings");
@@ -242,6 +419,18 @@ export function createMysqlStore(connectionString?: string): DataStore {
             order.id, item.printId, item.quantity,
           ]);
         }
+        for (const booking of data.materialBookings) {
+          await connection.query(
+            "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES (?, ?, ?, ?, ?)",
+            [booking.id, booking.printId, booking.createdAt, materialBookingActiveKey(booking), JSON.stringify(booking)]
+          );
+        }
+      }
+      for (const movement of data.accessoryStockMovements) {
+        await connection.query(
+          "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)",
+          [movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement)]
+        );
       }
       await connection.commit();
     } catch (error) {
@@ -268,7 +457,14 @@ export function createMysqlStore(connectionString?: string): DataStore {
     savePrintCostInputs,
     listOrders,
     saveOrder,
+    saveOrderQueue,
     deleteOrder,
+    listMaterialBookings,
+    createMaterialBooking,
+    saveMaterialBooking,
+    listAccessoryStockMovements,
+    applyAccessoryStockMovements,
+    importAccessoryStockMovements,
     replaceApplicationData,
   };
 }

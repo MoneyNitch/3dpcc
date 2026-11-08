@@ -14,6 +14,7 @@ import { exportAuthDatabase, restoreAuthDatabase, verifyAuthDatabase } from "./a
 import { defaultCostInputs } from "./costCalculator";
 import { getApplicationDataSnapshot, replaceApplicationData } from "./db";
 import {
+  accessoryStockMovementSchema,
   costInputsSchema,
   printSchema,
   settingsSchema,
@@ -23,8 +24,9 @@ import { orderInputSchema } from "./orders";
 import { getPreviewQueue } from "./previewQueue";
 import { normalizeFilamentServiceUrl, type FilamentConnection } from "./externalFilaments";
 import type { ApplicationDataSnapshot } from "./db/shared";
-import type { PrintOrder } from "./types";
+import type { MaterialBooking, PrintOrder } from "./types";
 import { orderCalculationSnapshotSchema } from "./orderCalculation";
+import { materialBookingSchema } from "./externalFilaments";
 
 const magic = Buffer.from("3DPCCBACKUP1", "ascii");
 export const maximumBackupBytes = 512 * 1024 * 1024;
@@ -123,6 +125,8 @@ export async function createBackup(passphrase: string): Promise<Buffer> {
       })),
     })),
     orders: snapshot.orders,
+    materialBookings: snapshot.materialBookings,
+    accessoryStockMovements: snapshot.accessoryStockMovements,
     filamentConnections: getFilamentConnections(),
   }), "utf8"));
   zip.addFile("auth/auth.db", authDatabase);
@@ -250,6 +254,7 @@ function parseBackupData(zip: AdmZip): BackupData {
 
   const orderSchema = orderInputSchema.extend({
     id: z.uuid(),
+    queuePosition: z.number().int().nonnegative().optional(),
     calculation: orderCalculationSnapshotSchema.optional(),
     gcodeAttachment: z.strictObject({
       fileName: z.string().min(1).max(255),
@@ -257,6 +262,10 @@ function parseBackupData(zip: AdmZip): BackupData {
     }).optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
+    history: z.array(z.strictObject({
+      type: z.enum(["created", "updated", "completed"]),
+      at: z.iso.datetime(),
+    })).optional(),
   });
   const orders = object.orders.map((value) => {
     const order = orderSchema.safeParse(value);
@@ -265,6 +274,40 @@ function parseBackupData(zip: AdmZip): BackupData {
   });
   if (new Set(orders.map((order) => order.id)).size !== orders.length) {
     throw new BackupError("Backup enthält doppelte Aufträge.");
+  }
+  const rawBookings = object.materialBookings ?? [];
+  if (!Array.isArray(rawBookings)) throw new BackupError("Backup enthält ungültige Materialbuchungen.");
+  const materialBookings: MaterialBooking[] = rawBookings.map((value) => {
+    const booking = materialBookingSchema.safeParse(value);
+    if (!booking.success) throw new BackupError("Backup enthält eine ungültige Materialbuchung.");
+    return booking.data;
+  });
+  const rawAccessoryMovements = object.accessoryStockMovements ?? [];
+  if (!Array.isArray(rawAccessoryMovements)) throw new BackupError("Backup enthält ungültige Zubehörbuchungen.");
+  const accessoryStockMovements = rawAccessoryMovements.map((value) => {
+    const movement = accessoryStockMovementSchema.safeParse(value);
+    if (!movement.success) throw new BackupError("Backup enthält eine ungültige Zubehörbuchung.");
+    return movement.data;
+  });
+  if (new Set(accessoryStockMovements.map((movement) => movement.id)).size !== accessoryStockMovements.length ||
+    new Set(accessoryStockMovements.flatMap((movement) => movement.referenceKey ? [movement.referenceKey] : [])).size !==
+      accessoryStockMovements.filter((movement) => movement.referenceKey).length) {
+    throw new BackupError("Backup enthält doppelte Zubehörbuchungen.");
+  }
+  const bookingById = new Map(materialBookings.map((booking) => [booking.id, booking]));
+  const reversedBookingIds = new Set<string>();
+  const invalidReversal = materialBookings.some((booking) => {
+    if (booking.kind !== "reversal" || !booking.relatedBookingId) return false;
+    const original = bookingById.get(booking.relatedBookingId);
+    if (!original || original.kind !== "consumption" || original.status !== "confirmed" ||
+      original.printId !== booking.printId || original.provider !== booking.provider ||
+      original.sourceUrl !== booking.sourceUrl || original.spoolId !== booking.spoolId ||
+      reversedBookingIds.has(original.id)) return true;
+    reversedBookingIds.add(original.id);
+    return false;
+  });
+  if (new Set(materialBookings.map((booking) => booking.id)).size !== materialBookings.length || invalidReversal) {
+    throw new BackupError("Backup enthält ungültige Materialbuchungen.");
   }
   const printIds = new Set(prints.map((entry) => entry.print.id));
   if (new Set([...printIds]).size !== prints.length ||
@@ -306,7 +349,7 @@ function parseBackupData(zip: AdmZip): BackupData {
     .map((entry) => ({ name: entry.entryName, data: entry.getData() }));
 
   return {
-    snapshot: { settings: settings.data, prints, orders },
+    snapshot: { settings: settings.data, prints, orders, materialBookings, accessoryStockMovements },
     authDatabase: authEntry.getData(),
     filamentConnections: restoredConnections,
     localFiles,

@@ -1,8 +1,8 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
-import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
-import { defaultSettings, migrateSettings, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
+import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { defaultSettings, materialBookingActiveKey, migrateSettings, preserveAccessoryStock, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 function openDb(): Database.Database {
   const dataDir = path.join(process.cwd(), "data");
@@ -48,6 +48,20 @@ function openDb(): Database.Database {
       quantity INTEGER NOT NULL,
       PRIMARY KEY (order_id, print_id)
     );
+    CREATE TABLE IF NOT EXISTS material_bookings (
+      id TEXT PRIMARY KEY,
+      print_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      active_key TEXT UNIQUE,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS accessory_stock_movements (
+      id TEXT PRIMARY KEY,
+      accessory_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      reference_key TEXT UNIQUE,
+      data TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -68,9 +82,14 @@ export function createSqliteStore(): DataStore {
   }
 
   async function saveSettings(settings: AppSettings): Promise<void> {
-    db.prepare(
-      "INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data"
-    ).run(JSON.stringify(settings));
+    const save = db.transaction(() => {
+      const row = db.prepare("SELECT data FROM settings WHERE id = 1").get() as { data: string } | undefined;
+      const next = row ? preserveAccessoryStock(settings, migrateSettings(JSON.parse(row.data))) : settings;
+      db.prepare(
+        "INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data"
+      ).run(JSON.stringify(next));
+    });
+    save.immediate();
   }
 
   async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -174,13 +193,106 @@ export function createSqliteStore(): DataStore {
     }).immediate();
   }
 
+  async function saveOrderQueue(orders: PrintOrder[]): Promise<void> {
+    const update = db.transaction(() => {
+      const statement = db.prepare("UPDATE orders SET updated_at = ?, data = ? WHERE id = ?");
+      for (const order of orders) {
+        const result = statement.run(order.updatedAt, JSON.stringify(order), order.id);
+        if (result.changes !== 1) throw new Error("Auftrag nicht gefunden.");
+      }
+    });
+    update.immediate();
+  }
+
   async function deleteOrder(id: string): Promise<void> {
     db.prepare("DELETE FROM orders WHERE id = ?").run(id);
   }
 
+  async function listMaterialBookings(printId?: string): Promise<MaterialBooking[]> {
+    const rows = printId
+      ? db.prepare("SELECT data FROM material_bookings WHERE print_id = ? ORDER BY created_at DESC").all(printId)
+      : db.prepare("SELECT data FROM material_bookings ORDER BY created_at DESC").all();
+    return (rows as { data: string }[]).map((row) => JSON.parse(row.data) as MaterialBooking);
+  }
+
+  async function createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean> {
+    const result = db.prepare(
+      "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING"
+    ).run(booking.id, booking.printId, booking.createdAt, activeKey, JSON.stringify(booking));
+    return result.changes === 1;
+  }
+
+  async function saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void> {
+    const result = db.prepare(
+      "UPDATE material_bookings SET active_key = ?, data = ? WHERE id = ?"
+    ).run(activeKey, JSON.stringify(booking), booking.id);
+    if (result.changes !== 1) throw new Error("Materialbuchung nicht gefunden.");
+  }
+
+  async function listAccessoryStockMovements(): Promise<AccessoryStockMovement[]> {
+    const rows = db.prepare("SELECT data FROM accessory_stock_movements ORDER BY created_at DESC").all() as { data: string }[];
+    return rows.map((row) => JSON.parse(row.data) as AccessoryStockMovement);
+  }
+
+  async function applyAccessoryStockMovements(
+    movements: AccessoryStockMovement[],
+  ): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found"> {
+    const apply = db.transaction(() => {
+      const existing = db.prepare("SELECT data FROM settings WHERE id = 1").get() as { data: string } | undefined;
+      if (!existing) return "not_found" as const;
+      const settings = migrateSettings(JSON.parse(existing.data));
+      const items = new Map(settings.accessoryMaterials.map((item) => [item.id, item]));
+      if (movements.some((movement) => !items.has(movement.accessoryId))) return "not_found" as const;
+      const hasDuplicate = db.prepare(
+        "SELECT 1 FROM accessory_stock_movements WHERE reference_key = ?"
+      );
+      if (movements.some((movement) => movement.referenceKey && hasDuplicate.get(movement.referenceKey))) {
+        return "duplicate" as const;
+      }
+      const deltas = new Map<string, number>();
+      for (const movement of movements) {
+        deltas.set(movement.accessoryId, (deltas.get(movement.accessoryId) ?? 0) + movement.quantity);
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta < 0)) {
+        return "insufficient" as const;
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta > 1_000_000_000)) {
+        return "limit" as const;
+      }
+      const updatedSettings: AppSettings = {
+        ...settings,
+        accessoryMaterials: settings.accessoryMaterials.map((item) => ({
+          ...item,
+          stockQuantity: item.stockQuantity + (deltas.get(item.id) ?? 0),
+        })),
+      };
+      db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(JSON.stringify(updatedSettings));
+      const insert = db.prepare(
+        "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const movement of movements) {
+        insert.run(movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement));
+      }
+      return "applied" as const;
+    });
+    return apply.immediate();
+  }
+
+  async function importAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<void> {
+    const insert = db.transaction(() => {
+      const statement = db.prepare(
+        "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const movement of movements) {
+        statement.run(movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement));
+      }
+    });
+    insert.immediate();
+  }
+
   async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
     const replace = db.transaction(() => {
-      db.exec("DELETE FROM order_items; DELETE FROM print_models; DELETE FROM prints; DELETE FROM orders; DELETE FROM settings;");
+      db.exec("DELETE FROM order_items; DELETE FROM material_bookings; DELETE FROM accessory_stock_movements; DELETE FROM print_models; DELETE FROM prints; DELETE FROM orders; DELETE FROM settings;");
       db.prepare("INSERT INTO settings (id, data) VALUES (1, ?)").run(JSON.stringify(data.settings));
       const printStatement = db.prepare(
         "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES (?, ?, ?, ?, ?)"
@@ -204,6 +316,18 @@ export function createSqliteStore(): DataStore {
         orderStatement.run(order.id, order.updatedAt, JSON.stringify(order));
         for (const item of order.items) orderItemStatement.run(order.id, item.printId, item.quantity);
       }
+      const bookingStatement = db.prepare(
+        "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const booking of data.materialBookings) {
+        bookingStatement.run(booking.id, booking.printId, booking.createdAt, materialBookingActiveKey(booking), JSON.stringify(booking));
+      }
+      const accessoryMovementStatement = db.prepare(
+        "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const movement of data.accessoryStockMovements) {
+        accessoryMovementStatement.run(movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement));
+      }
     });
     replace.immediate();
   }
@@ -224,7 +348,14 @@ export function createSqliteStore(): DataStore {
     savePrintCostInputs,
     listOrders,
     saveOrder,
+    saveOrderQueue,
     deleteOrder,
+    listMaterialBookings,
+    createMaterialBooking,
+    saveMaterialBooking,
+    listAccessoryStockMovements,
+    applyAccessoryStockMovements,
+    importAccessoryStockMovements,
     replaceApplicationData,
   };
 }

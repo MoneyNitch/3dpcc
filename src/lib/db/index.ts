@@ -1,4 +1,4 @@
-import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import type { AccessoryStockMovement, AppSettings, Customer, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { resolveDbConnection, type ResolvedDbConnection } from "../dbConfig";
 import { materialBookingActiveKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 import { originalArchives } from "../originalArchives";
@@ -38,9 +38,15 @@ export async function getSettings(): Promise<AppSettings> {
   return (await getStore()).getSettings();
 }
 
-export async function saveSettings(settings: AppSettings): Promise<void> {
-  await (await getStore()).saveSettings(settings);
+export async function saveSettings(settings: AppSettings, preserveManaged = false): Promise<void> {
+  await (await getStore()).saveSettings(settings, preserveManaged);
   softwareUpdates.configure(settings.general);
+}
+
+export async function updateSettings(update: (current: AppSettings) => AppSettings): Promise<AppSettings> {
+  const settings = await (await getStore()).updateSettings(update);
+  softwareUpdates.configure(settings.general);
+  return settings;
 }
 
 export async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -103,9 +109,23 @@ export async function listOrders(): Promise<PrintOrder[]> {
   return (await getStore()).listOrders();
 }
 
-export async function saveOrder(order: PrintOrder): Promise<PrintOrder> {
+export async function listCustomers(): Promise<Customer[]> {
+  return (await getStore()).listCustomers();
+}
+
+export async function saveCustomer(customer: Customer, expectedUpdatedAt?: string): Promise<boolean> {
+  return (await getStore()).saveCustomer(customer, expectedUpdatedAt);
+}
+
+export function saveOrder(order: PrintOrder): Promise<PrintOrder>;
+export function saveOrder(order: PrintOrder, expectedUpdatedAt: string): Promise<PrintOrder | null>;
+export async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): Promise<PrintOrder | null> {
   const store = await getStore();
   const existing = (await store.listOrders()).find((item) => item.id === order.id);
+  if (expectedUpdatedAt) {
+    if (!existing || existing.updatedAt !== expectedUpdatedAt) return null;
+    order = { ...order, updatedAt: new Date(Math.max(Date.parse(order.updatedAt), Date.parse(existing.updatedAt) + 1)).toISOString() };
+  }
   let saved: PrintOrder;
   if (!existing) {
     const history = order.history ?? [
@@ -120,6 +140,10 @@ export async function saveOrder(order: PrintOrder): Promise<PrintOrder> {
       history: [
         ...history,
         { type: "updated", at: order.updatedAt },
+        ...((["paymentStatus", "paymentMethod", "paidAmount", "paymentCurrency"] as const).some((field) => existing[field] !== order[field])
+          ? [{ type: "payment_updated" as const, at: order.updatedAt }] : []),
+        ...((["shippingStatus", "shippingMethod", "trackingNumber"] as const).some((field) => existing[field] !== order[field])
+          ? [{ type: "shipping_updated" as const, at: order.updatedAt }] : []),
         ...(existing.status !== "completed" && order.status === "completed"
           ? [{ type: "completed" as const, at: order.updatedAt }]
           : []),
@@ -128,7 +152,7 @@ export async function saveOrder(order: PrintOrder): Promise<PrintOrder> {
   } else {
     saved = { ...order, history: order.history ?? existing.history };
   }
-  await store.saveOrder(saved);
+  if (!(await store.saveOrder(saved, expectedUpdatedAt))) return null;
   return saved;
 }
 
@@ -179,15 +203,17 @@ export async function deleteOrder(id: string): Promise<void> {
 
 export async function getApplicationDataSnapshot(): Promise<ApplicationDataSnapshot> {
   const store = await getStore();
-  const [settings, prints, orders, materialBookings, accessoryStockMovements] = await Promise.all([
+  const [settings, prints, orders, materialBookings, accessoryStockMovements, customers] = await Promise.all([
     store.getSettings(),
     store.listPrints(),
     store.listOrders(),
     store.listMaterialBookings(),
     store.listAccessoryStockMovements(),
+    store.listCustomers(),
   ]);
   return {
     settings,
+    customers,
     orders,
     materialBookings,
     accessoryStockMovements,
@@ -216,7 +242,15 @@ export async function transferDatabaseData(targetConnection: ResolvedDbConnectio
     }
   }
 
+  const customers = await source.listCustomers();
+  const targetCustomerIds = new Set((await target.listCustomers()).map((customer) => customer.id));
+  if (customers.some((customer) => targetCustomerIds.has(customer.id))) {
+    throw new Error("Mindestens ein Kunde existiert bereits in der Zieldatenbank.");
+  }
   await target.saveSettings(settings);
+  for (const customer of customers) {
+    if (!(await target.saveCustomer(customer))) throw new Error(`Kunde existiert bereits in der Zieldatenbank: ${customer.id}`);
+  }
   for (const print of prints) {
     await target.insertPrint(print);
     for (const { plateIndex, model } of await source.listPrintModels(print.id)) {

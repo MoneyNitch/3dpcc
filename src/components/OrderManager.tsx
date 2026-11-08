@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import { useLocale } from "@/lib/locale";
 import { getIntlLocale } from "@/lib/i18n";
-import type { OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
+import type { Customer, OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
+import { calculateOrderSnapshot, orderCalculationMatchesItems } from "@/lib/orderCalculation";
 import type { OrderInput } from "@/lib/orders";
+import { customerLabel } from "@/lib/customers";
 import { formatDuration, orderDurationSeconds, sortPrintQueue } from "@/lib/orderPlanning";
 import {
   defaultOrderFilters, dueFilters, filterOrders, isOrderOverdue, localDateKey, type OrderFilters,
@@ -43,6 +45,7 @@ function subscribeToDateChange(onChange: () => void) {
 
 const emptyDraft: Draft = {
   customerName: "",
+  customerId: null,
   status: "open",
   priority: "normal",
   printerId: null,
@@ -54,6 +57,7 @@ const emptyDraft: Draft = {
 function draftFromOrder(order: PrintOrder): Draft {
   return {
     customerName: order.customerName,
+    customerId: order.customerId ?? null,
     status: order.status,
     priority: order.priority ?? "normal",
     printerId: order.printerId ?? null,
@@ -70,6 +74,7 @@ export function OrderManager({
   canEdit,
   initialEditingOrderId,
   initialToday,
+  customers,
 }: {
   initialOrders: PrintOrder[];
   prints: PrintOption[];
@@ -77,6 +82,7 @@ export function OrderManager({
   canEdit: boolean;
   initialEditingOrderId?: string;
   initialToday: string;
+  customers: Pick<Customer, "id" | "name" | "company" | "archived">[];
 }) {
   const { t, lang } = useLocale();
   const initialEditingOrder = canEdit ? initialOrders.find((order) => order.id === initialEditingOrderId) : undefined;
@@ -85,6 +91,7 @@ export function OrderManager({
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
   const [editingId, setEditingId] = useState<string | null>(initialEditingOrder?.id ?? null);
   const [formOpen, setFormOpen] = useState(Boolean(initialEditingOrder));
+  const [view, setView] = useState<"overview" | "planning">("overview");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const printNames = new Map(prints.map((print) => [print.id, print.name]));
@@ -92,7 +99,7 @@ export function OrderManager({
   const inputClass =
     "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
   const sortSelectClass =
-    "mt-1 min-w-40 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
+    "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
   const statusOptions: OrderStatus[] = ["open", "in_progress", "ready", "completed", "cancelled"];
   const priorityOptions: OrderPriority[] = ["low", "normal", "high"];
   const [sortField, setSortField] = useState<(typeof sortFields)[number]>("priority");
@@ -357,21 +364,51 @@ export function OrderManager({
         }`}>{message.text}</p>
       )}
 
-      {canEdit && !formOpen && (
-        <button type="button" onClick={startNewOrder}
+      {!formOpen && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "orders.overview.active", count: orders.filter((order) => !["completed", "cancelled"].includes(order.status)).length, status: "active" as const, due: "all" as const },
+          { label: "orders.status.in_progress", count: orders.filter((order) => order.status === "in_progress").length, status: "in_progress" as const, due: "all" as const },
+          { label: "orders.status.ready", count: orders.filter((order) => order.status === "ready").length, status: "ready" as const, due: "all" as const },
+          { label: "orders.overdue", count: orders.filter((order) => isOrderOverdue(order, today)).length, status: "not_completed" as const, due: "overdue" as const },
+        ].map((stat) => <button key={stat.label} type="button" onClick={() => { setView("overview"); setFilters({ ...defaultOrderFilters, status: stat.status, due: stat.due }); }}
+          className={`rounded-xl border bg-white p-4 text-left shadow-sm dark:bg-slate-800 ${stat.label === "orders.overdue" && stat.count ? "border-red-300 text-red-700 dark:border-red-800 dark:text-red-300" : "border-slate-200 dark:border-slate-700"}`}>
+          <span className="text-xs text-slate-500 dark:text-slate-400">{t(stat.label)}</span><span className="mt-1 block text-2xl font-semibold">{stat.count}</span>
+        </button>)}
+      </div>}
+      {!formOpen && <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800">
+          {(["overview", "planning"] as const).map((tab) => <button type="button" key={tab} aria-pressed={view === tab}
+            onClick={() => setView(tab)} className={`rounded-lg px-4 py-2 text-sm font-medium ${view === tab ? "bg-orange-50 text-orange-800 dark:bg-orange-950/30 dark:text-orange-300" : "text-slate-500 dark:text-slate-400"}`}>{t(tab === "overview" ? "orders.overview.title" : "orders.queue.title")}</button>)}
+        </div>
+        {canEdit && <button type="button" onClick={startNewOrder}
           className="self-start rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600">
           {t("orders.create")}
-        </button>
-      )}
+        </button>}
+      </div>}
 
       {formOpen && (
         <form onSubmit={(event) => void saveOrder(event)}
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <h2 className="text-lg font-semibold">{t(editingId ? "orders.edit" : "orders.create")}</h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("orders.overview.formHelp")}</p>
+          <div className="mt-4 grid gap-4 rounded-lg bg-slate-50 p-4 sm:grid-cols-2 dark:bg-slate-900/40">
+            <label className="text-sm font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
+              {t("customers.select")}
+              <select className={inputClass} value={draft.customerId ?? ""} onChange={(event) => {
+                const customer = customers.find((entry) => entry.id === event.target.value);
+                setDraft((current) => ({ ...current, customerId: customer?.id ?? null,
+                  customerName: customer ? customerLabel(customer) : current.customerName }));
+              }}>
+                <option value="">{t("customers.freeName")}</option>
+                {customers.filter((customer) => !customer.archived || customer.id === draft.customerId).map((customer) => (
+                  <option key={customer.id} value={customer.id}>{customer.name}{customer.company ? ` · ${customer.company}` : ""}{customer.archived ? ` (${t("customers.archived")})` : ""}</option>
+                ))}
+              </select>
+              <Link href="/customers" className="mt-1 inline-block text-xs text-orange-700 hover:underline dark:text-orange-300">{t("customers.manage")}</Link>
+            </label>
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
               {t("orders.customer")}
-              <input className={inputClass} value={draft.customerName} required maxLength={200}
+              <input className={inputClass} value={draft.customerName} required readOnly={Boolean(draft.customerId)} maxLength={403}
                 onChange={(event) => setDraft((current) => ({ ...current, customerName: event.target.value }))} />
             </label>
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
@@ -476,7 +513,7 @@ export function OrderManager({
         </form>
       )}
 
-      {!formOpen && (
+      {!formOpen && view === "planning" && (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <h2 className="text-lg font-semibold">{t("orders.queue.title")}</h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("orders.queue.rule")}</p>
@@ -492,7 +529,7 @@ export function OrderManager({
               ))}
             </div>
           </fieldset>}
-          <div className="mt-4 grid gap-4">
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
             {printers.map((printer) => {
               if (hiddenPrinterIds.includes(printer.id)) return null;
               const queue = queueForPrinter(printer.id);
@@ -557,14 +594,14 @@ export function OrderManager({
         </section>
       )}
 
-      {orders.length === 0 ? (
+      {!formOpen && view === "overview" && (orders.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
           {t("orders.empty")}
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="min-w-40 flex-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+          <div className="grid items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-700 dark:bg-slate-800">
+            <label className="min-w-0 text-sm font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
               {t("orders.customerSearch")}
               <input type="search" className={inputClass} value={filters.customer}
                 onChange={(event) => setFilters((current) => ({ ...current, customer: event.target.value }))} />
@@ -573,11 +610,12 @@ export function OrderManager({
               {t("orders.statusFilter")}
               <select className={sortSelectClass} value={filters.status}
                 onChange={(event) => {
-                  const status = (["not_completed", "all", ...statusOptions] as const)
+                  const status = (["not_completed", "active", "all", ...statusOptions] as const)
                     .find((option) => option === event.target.value);
                   if (status) setFilters((current) => ({ ...current, status }));
                 }}>
                 <option value="not_completed">{t("orders.notCompleted")}</option>
+                <option value="active">{t("orders.overview.active")}</option>
                 <option value="all">{t("orders.filterAll")}</option>
                 {statusOptions.map((status) => <option key={status} value={status}>{t(`orders.status.${status}`)}</option>)}
               </select>
@@ -650,6 +688,7 @@ export function OrderManager({
               }`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
+                    <p className="mb-1 font-mono text-xs text-slate-500 dark:text-slate-400">ORD-{order.id.slice(0, 8).toUpperCase()}</p>
                     <h2 className="text-lg font-semibold">
                       <Link href={`/orders/${order.id}`} className="hover:text-orange-600 hover:underline dark:hover:text-orange-400">{order.customerName}</Link>
                     </h2>
@@ -708,6 +747,15 @@ export function OrderManager({
                     </div>
                   )}
                 </div>
+                <div className="mt-4 grid gap-3 rounded-lg bg-slate-50 p-3 text-sm sm:grid-cols-3 dark:bg-slate-900/40">
+                  <div><p className="text-xs text-slate-500">{t("orders.items")}</p><p className="mt-1 font-medium">{order.items.reduce((sum, item) => sum + item.quantity, 0)} {t("extra.unit")}</p></div>
+                  <div><p className="text-xs text-slate-500">{t("orders.workflow.payment")}</p><p className="mt-1 font-medium">{t(`orders.payment.${order.paymentStatus ?? "unpaid"}`)}</p></div>
+                  <div><p className="text-xs text-slate-500">{t("cost.totalPrice")}</p><p className="mt-1 font-semibold">{order.calculation
+                    ? new Intl.NumberFormat(getIntlLocale(lang), { style: "currency", currency: order.calculation.currency }).format(calculateOrderSnapshot(order.calculation).totals.totalPrice)
+                    : t("orders.overview.noPrice")}</p>
+                    {order.calculation && !orderCalculationMatchesItems(order, order.calculation) && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{t("orders.overview.outdatedPrice")}</p>}
+                  </div>
+                </div>
                 <ul className="mt-3 flex flex-col gap-1 text-sm">
                   {order.items.map((item) => (
                     <li key={item.printId} className="flex flex-wrap justify-between gap-2">
@@ -720,7 +768,7 @@ export function OrderManager({
                     </li>
                   ))}
                 </ul>
-                {order.notes && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">{order.notes}</p>}
+                {order.notes && <details className="mt-3 text-sm text-slate-600 dark:text-slate-300"><summary className="cursor-pointer">{t("orders.notes")}</summary><p className="mt-2 whitespace-pre-wrap">{order.notes}</p></details>}
                 {order.gcodeAttachment && (
                   <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
                     <a
@@ -748,7 +796,7 @@ export function OrderManager({
             ))}
           </div>
         </>
-      )}
+      ))}
     </div>
   );
 }

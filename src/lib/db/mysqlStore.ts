@@ -1,8 +1,9 @@
 import mysql from "mysql2/promise";
-import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import type { AccessoryStockMovement, AppSettings, Customer, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { defaultSettings, materialBookingActiveKey, migrateSettings, preserveAccessoryStock, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 async function ensureSchema(pool: mysql.Pool): Promise<void> {
+  await pool.query("CREATE TABLE IF NOT EXISTS customers (id VARCHAR(64) PRIMARY KEY, updated_at VARCHAR(64) NOT NULL, data LONGTEXT NOT NULL)");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS prints (
       id VARCHAR(64) PRIMARY KEY,
@@ -84,7 +85,7 @@ export function createMysqlStore(connectionString?: string): DataStore {
     return migrateSettings(JSON.parse(rows[0].data));
   }
 
-  async function saveSettings(settings: AppSettings): Promise<void> {
+  async function updateSettings(update: (current: AppSettings) => AppSettings): Promise<AppSettings> {
     await ready;
     const connection = await pool.getConnection();
     try {
@@ -92,18 +93,26 @@ export function createMysqlStore(connectionString?: string): DataStore {
       const [rows] = await connection.query<mysql.RowDataPacket[]>(
         "SELECT data FROM settings WHERE id = 1 FOR UPDATE"
       );
-      const next = rows[0] ? preserveAccessoryStock(settings, migrateSettings(JSON.parse(rows[0].data))) : settings;
+      const next = update(rows[0] ? migrateSettings(JSON.parse(rows[0].data)) : structuredClone(defaultSettings));
       await connection.query(
         "INSERT INTO settings (id, data) VALUES (1, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
         [JSON.stringify(next)]
       );
       await connection.commit();
+      return next;
     } catch (error) {
       await connection.rollback();
       throw error;
     } finally {
       connection.release();
     }
+
+  }
+
+  async function saveSettings(settings: AppSettings, preserveManaged = false): Promise<void> {
+    await updateSettings((current) => preserveManaged
+      ? { ...settings, nextAccessoryNumber: current.nextAccessoryNumber, accessoryMaterials: current.accessoryMaterials, labelTemplates: current.labelTemplates, productTypes: current.productTypes }
+      : preserveAccessoryStock(settings, current));
   }
 
   async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -213,12 +222,20 @@ export function createMysqlStore(connectionString?: string): DataStore {
     return rows.map((row) => JSON.parse(row.data) as PrintOrder);
   }
 
-  async function saveOrder(order: PrintOrder): Promise<void> {
+  async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): Promise<boolean> {
     await ready;
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
-      await connection.query(
+      if (expectedUpdatedAt) {
+        const [result] = await connection.query<mysql.ResultSetHeader>(
+          "UPDATE orders SET updated_at = ?, data = ? WHERE id = ? AND updated_at = ?",
+          [order.updatedAt, JSON.stringify(order), order.id, expectedUpdatedAt]);
+        if (result.affectedRows !== 1) {
+          await connection.rollback();
+          return false;
+        }
+      } else await connection.query(
         "INSERT INTO orders (id, updated_at, data) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at), data = VALUES(data)",
         [order.id, order.updatedAt, JSON.stringify(order)]
       );
@@ -229,6 +246,7 @@ export function createMysqlStore(connectionString?: string): DataStore {
         ]);
       }
       await connection.commit();
+      return true;
     } catch (error) {
       await connection.rollback();
       throw error;
@@ -398,6 +416,10 @@ export function createMysqlStore(connectionString?: string): DataStore {
       await connection.query("DELETE FROM orders");
       await connection.query("DELETE FROM settings");
       await connection.query("INSERT INTO settings (id, data) VALUES (1, ?)", [JSON.stringify(data.settings)]);
+      await connection.query("DELETE FROM customers");
+      for (const customer of data.customers ?? []) {
+        await connection.query("INSERT INTO customers (id, updated_at, data) VALUES (?, ?, ?)", [customer.id, customer.updatedAt, JSON.stringify(customer)]);
+      }
       for (const entry of data.prints) {
         await connection.query(
           "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES (?, ?, ?, ?, ?)",
@@ -441,7 +463,34 @@ export function createMysqlStore(connectionString?: string): DataStore {
     }
   }
 
+  async function listCustomers(): Promise<Customer[]> {
+    await ready;
+    const [rows] = await pool.query<mysql.RowDataPacket[]>("SELECT data FROM customers ORDER BY updated_at DESC");
+    return rows.map((row) => JSON.parse(row.data) as Customer);
+  }
+
+  async function saveCustomer(customer: Customer, expectedUpdatedAt?: string): Promise<boolean> {
+    await ready;
+    if (expectedUpdatedAt) {
+      const [result] = await pool.query<mysql.ResultSetHeader>(
+        "UPDATE customers SET updated_at = ?, data = ? WHERE id = ? AND updated_at = ?",
+        [customer.updatedAt, JSON.stringify(customer), customer.id, expectedUpdatedAt]);
+      return result.affectedRows === 1;
+    }
+    try {
+      await pool.query("INSERT INTO customers (id, updated_at, data) VALUES (?, ?, ?)",
+        [customer.id, customer.updatedAt, JSON.stringify(customer)]);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ER_DUP_ENTRY") return false;
+      throw error;
+    }
+  }
+
   return {
+    updateSettings,
+    listCustomers,
+    saveCustomer,
     getSettings,
     saveSettings,
     insertPrint,

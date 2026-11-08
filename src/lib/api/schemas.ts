@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CURRENCY_CODES } from "../currency";
 import { externalSpoolSchema } from "../externalFilaments";
+import { labelTemplatesSchema } from "../labelTemplates";
 
 const text = z.string().max(2000);
 export const idSchema = z.string().min(1).max(100);
@@ -15,6 +16,7 @@ export const materialSchema = z.strictObject({
 });
 export const accessorySchema = z.strictObject({
   id: idSchema, name, pricePerPack: amount, unitsPerPack: z.number().int().positive().max(1_000_000),
+  numericId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER - 1).optional(),
   stockQuantity: z.number().int().min(0).max(1_000_000_000).default(0),
 });
 export const accessoryStockMovementSchema = z.strictObject({
@@ -31,6 +33,18 @@ export const printerSchema = z.strictObject({
   id: idSchema, name, powerConsumptionW: amount, purchasePrice: amount,
   lifetimeHours: z.number().positive().max(1_000_000), maintenanceCostPerHour: amount,
 });
+const productTypeSchema = z.strictObject({
+  id: z.uuid(), name: z.string().trim().min(1).max(100),
+  prefix: z.string().regex(/^[A-Za-z0-9._-]{1,30}$/),
+  digits: z.number().int().min(1).max(12),
+  nextNumber: z.number().int().min(1).max(1_000_000_001),
+  fileName: z.string().min(1).max(255),
+  linkedPrintId: z.uuid().nullable(),
+  imageMode: z.enum(["print", "custom", "none"]),
+  imageBase64: z.string().max(7_000_000)
+    .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).nullable(),
+}).refine((product) => product.imageMode !== "custom" || product.imageBase64 !== null,
+  "Custom product images must be provided.");
 const costLine = z.enum(["material", "extraMaterials", "energy", "machine", "labor", "packaging", "margin", "tax"]);
 export const templateSchema = z.strictObject({
   id: idSchema, name, paperFormat: z.enum(["A4", "A5", "Letter", "Legal"]),
@@ -54,8 +68,16 @@ const numberingSchema = z.strictObject({
   digits: z.number().int().min(1).max(12),
 });
 export const settingsSchema = z.strictObject({
+  nextAccessoryNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(1),
+  labelTemplates: labelTemplatesSchema.default([]),
+  productTypes: z.array(productTypeSchema).max(1000).default([]).refine(uniqueIds, "Product type IDs must be unique.")
+    .refine((items) => new Set(items.map((item) => item.prefix.toLowerCase())).size === items.length, "Product prefixes must be unique."),
   materials: z.array(materialSchema).max(1000).refine(uniqueIds, "Material IDs must be unique."),
-  accessoryMaterials: z.array(accessorySchema).max(1000).refine(uniqueIds, "Accessory IDs must be unique."),
+  accessoryMaterials: z.array(accessorySchema).max(1000).refine(uniqueIds, "Accessory IDs must be unique.")
+    .refine((items) => {
+      const numbers = items.flatMap((item) => item.numericId === undefined ? [] : [item.numericId]);
+      return new Set(numbers).size === numbers.length;
+    }, "Accessory numbers must be unique."),
   printers: z.array(printerSchema).min(1).max(1000).refine(uniqueIds, "Printer IDs must be unique."),
   invoiceTemplates: z.array(templateSchema).max(100).refine(uniqueIds, "Template IDs must be unique."),
   quoteTemplates: z.array(templateSchema).max(100).refine(uniqueIds, "Template IDs must be unique."),
@@ -84,6 +106,9 @@ export const settingsSchema = z.strictObject({
   path: ["general", "language"], message: "Selected language must be installed.",
 });
 export const settingsPatchSchema = z.strictObject(settingsSchema.shape).partial().extend({
+  labelTemplates: labelTemplatesSchema.optional(),
+  productTypes: settingsSchema.shape.productTypes.unwrap().optional(),
+  nextAccessoryNumber: settingsSchema.shape.nextAccessoryNumber.unwrap().optional(),
   general: settingsSchema.shape.general.partial().optional(),
   costs: settingsSchema.shape.costs.partial().optional(),
   numbering: z.strictObject({

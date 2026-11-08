@@ -31,6 +31,7 @@ test("completed orders are excluded by default but can be explicitly shown", () 
   assert.deepEqual(ids({ status: "completed" }), ["completed"]);
   assert.deepEqual(ids({ status: "in_progress" }), ["today"]);
   assert.deepEqual(ids({ status: "cancelled" }), ["cancelled"]);
+  assert.deepEqual(ids({ status: "active" }), ["overdue", "today", "future", "undated"]);
 });
 
 test("customer search trims whitespace and matches partial names without case sensitivity", () => {

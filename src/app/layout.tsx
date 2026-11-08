@@ -6,6 +6,8 @@ import { LocaleProvider } from "@/lib/locale";
 import { Header } from "@/components/Header";
 import { AuthProvider } from "@/lib/auth/context";
 import { authEnabled, currentIdentity } from "@/lib/auth/server";
+import { softwareUpdates } from "@/lib/softwareUpdates";
+import { SoftwareUpdateProvider } from "@/lib/softwareUpdateContext";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -41,8 +43,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           initialLanguagePacks={settings.customLanguagePacks}
         >
           <AuthProvider enabled={enabled} user={user}>
+          <SoftwareUpdateProvider initialUpdate={softwareUpdates.getCachedUpdate(settings.general)}>
           <Header />
           <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
+          </SoftwareUpdateProvider>
           </AuthProvider>
         </LocaleProvider>
       </body>

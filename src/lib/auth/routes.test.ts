@@ -29,9 +29,15 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
     import * as support from ${moduleUrl("../../app/api/support-export/route.ts")};
     import * as backup from ${moduleUrl("../../app/api/backup/route.ts")};
     import * as orders from ${moduleUrl("../../app/api/orders/route.ts")};
+    import * as customers from ${moduleUrl("../../app/api/customers/route.ts")};
+    import * as accessories from ${moduleUrl("../../app/api/accessories/route.ts")};
+    import * as labels from ${moduleUrl("../../app/api/labels/route.ts")};
+    import * as labelTemplates from ${moduleUrl("../../app/api/label-templates/route.ts")};
+    import * as customer from ${moduleUrl("../../app/api/customers/[id]/route.ts")};
     import * as order from ${moduleUrl("../../app/api/orders/[id]/route.ts")};
     import * as orderGcode from ${moduleUrl("../../app/api/orders/[id]/gcode/route.ts")};
     import * as orderCalculation from ${moduleUrl("../../app/api/orders/[id]/calculate/route.ts")};
+    import * as orderInvoice from ${moduleUrl("../../app/api/orders/[id]/invoice/route.ts")};
     import * as v1 from ${moduleUrl("../../app/api/v1/[[...path]]/route.ts")};
     import { getAuthStore } from ${moduleUrl("./store.ts")};
     const password = "a-long-test-password";
@@ -51,9 +57,10 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
     }
     const reads = [prints.GET, (r) => print.GET(r, ctx), (r) => model.GET(r, ctx), (r) => download.GET(r, ctx),
       settings.GET, database.GET, spools.GET, queue.GET, support.GET, orders.GET,
-      (r) => orderGcode.GET(r, ctx), (r) => orderCalculation.GET(r, ctx), users.GET];
+      (r) => orderGcode.GET(r, ctx), (r) => orderCalculation.GET(r, ctx), users.GET, customers.GET];
     for (const handler of reads) assert.equal((await handler(request())).status, 401);
     const writes = [
+      ["POST", (r) => orderInvoice.POST(r, ctx)],
       ["POST", prints.POST], ["DELETE", (r) => print.DELETE(r, ctx)], ["PUT", (r) => print.PUT(r, ctx)],
       ["PATCH", (r) => print.PATCH(r, ctx)], ["POST", (r) => model.POST(r, ctx)],
       ["POST", (r) => plates.POST(r, ctx)], ["PATCH", (r) => plates.PATCH(r, ctx)],
@@ -62,10 +69,13 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
       ["POST", spools.POST],
       ["PUT", (r) => orderCalculation.PUT(r, ctx)],
       ["POST", backup.POST], ["PUT", backup.PUT], ["POST", orders.POST],
+      ["POST", customers.POST], ["PUT", (r) => customer.PUT(r, ctx)],
+      ["POST", accessories.POST], ["PUT", labelTemplates.PUT],
       ["PATCH", (r) => order.PATCH(r, ctx)], ["PUT", (r) => order.PUT(r, ctx)], ["DELETE", (r) => order.DELETE(r, ctx)],
       ["POST", (r) => orderGcode.POST(r, ctx)], ["DELETE", (r) => orderGcode.DELETE(r, ctx)],
     ];
     for (const [method, handler] of writes) assert.equal((await handler(request(method, {}))).status, 401);
+    assert.equal((await labels.POST(request("POST", {}))).status, 401);
     const initial = await login("admin", "admin");
     const initialCookie = cookie(initial);
     assert.match(initial.headers.get("set-cookie"), /Max-Age=43200/);
@@ -89,6 +99,7 @@ test("real routes enforce bootstrap, browser sessions, custom rights, user-bound
     const readerCookie = cookie(readerChanged);
     assert.equal((await prints.GET(request("GET", undefined, readerCookie))).status, 200);
     assert.equal((await settings.GET(request("GET", undefined, readerCookie))).status, 200);
+    assert.equal((await labels.POST(request("POST", {}, readerCookie))).status, 400);
     assert.equal((await database.GET(request("GET", undefined, readerCookie))).status, 403);
     assert.equal((await support.GET(request("GET", undefined, readerCookie))).status, 403);
     for (const [method, handler] of writes) assert.equal((await handler(request(method, {}, readerCookie))).status, 403);

@@ -7,6 +7,28 @@ const offline = { fetchGithubChangelog: false, checkGithubUpdates: false };
 const localChangelog = async () => "# Changelog\n\nLocal release notes";
 const release = { tag_name: "v999.0.0", draft: false, prerelease: false };
 
+test("menu reads only fresh cached update information and never initiates requests", async () => {
+  let calls = 0;
+  let now = 0;
+  const service = createSoftwareUpdates({
+    localChangelog, now: () => now,
+    request: async () => { calls++; return Response.json(release); },
+  });
+  const enabled = { ...offline, checkGithubUpdates: true };
+  assert.equal(service.getCachedUpdate(enabled), null);
+  assert.equal(service.getCachedUpdate(offline)?.status, "disabled");
+  assert.equal(calls, 0);
+  await service.getInfo(enabled);
+  assert.equal(service.getCachedUpdate(enabled)?.status, "available");
+  assert.equal(service.getCachedUpdate(offline)?.status, "disabled");
+  assert.equal(calls, 1);
+  now += 60 * 60 * 1000;
+  assert.equal(service.getCachedUpdate(enabled), null);
+  assert.equal(calls, 1);
+  service.configure(offline);
+  assert.equal(service.getCachedUpdate(enabled), null);
+});
+
 test("compares numeric versions, including v prefixes, installed prereleases and build metadata", () => {
   assert.equal(isNewerRelease("0.9.0", "v0.10.0"), true);
   assert.equal(isNewerRelease("1.10.0", "v1.9.0"), false);

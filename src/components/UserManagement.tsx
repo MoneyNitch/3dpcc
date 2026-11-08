@@ -6,6 +6,7 @@ import { permissions, type AuthUser, type Permission, type Role } from "@/lib/au
 import type { ApiKeyView } from "@/lib/auth/store";
 import { passwordCharacterRules, passwordPolicyError, type PasswordPolicy } from "@/lib/auth/passwordPolicy";
 import { PasswordRequirements } from "./PasswordRequirements";
+import { HttpWarning } from "./HttpWarning";
 
 interface Overview { users: AuthUser[]; roles: Role[]; keys: ApiKeyView[]; passwordPolicy: PasswordPolicy }
 const inputClass = "mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
@@ -197,6 +198,7 @@ export function UserManagement({ initial, actorId }: { initial: Overview; actorI
             </div>
             <button type="button" className={buttonClass} onClick={() => setKeyFormOpen((open) => !open)}>{t(keyFormOpen ? "auth.cancel" : "auth.createKey")}</button>
           </div>
+          <HttpWarning />
           {token && <div role="status" className="my-3 rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm dark:border-orange-800 dark:bg-orange-950/30"><p>{t("auth.keyOnce")}</p><code className="my-2 block select-all break-all">{token}</code><button type="button" className={buttonClass} onClick={() => setToken("")}>{t("auth.dismissKey")}</button></div>}
           {overview.keys.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">{t("auth.noApiKeys")}</p>}
           <div className="grid gap-2 sm:grid-cols-2">

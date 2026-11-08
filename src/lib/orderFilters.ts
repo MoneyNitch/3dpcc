@@ -3,7 +3,7 @@ import type { OrderPriority, OrderStatus, PrintOrder } from "./types";
 export const dueFilters = ["all", "overdue", "today", "upcoming", "undated"] as const;
 export type OrderFilters = {
   customer: string;
-  status: "not_completed" | "all" | OrderStatus;
+  status: "not_completed" | "active" | "all" | OrderStatus;
   priority: "all" | OrderPriority;
   due: (typeof dueFilters)[number];
 };
@@ -27,6 +27,8 @@ export function filterOrders(orders: PrintOrder[], filters: OrderFilters, today:
     if (!order.customerName.toLocaleLowerCase().includes(customer)) return false;
     if (filters.status === "not_completed") {
       if (order.status === "completed") return false;
+    } else if (filters.status === "active") {
+      if (order.status === "completed" || order.status === "cancelled") return false;
     } else if (filters.status !== "all" && order.status !== filters.status) return false;
     if (filters.priority !== "all" && (order.priority ?? "normal") !== filters.priority) return false;
     switch (filters.due) {

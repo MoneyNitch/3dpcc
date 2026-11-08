@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError, readJson } from "@/lib/api/http";
 import { authorize } from "@/lib/auth/server";
-import { getSettings, saveSettings } from "@/lib/db";
+import { getSettings, updateSettings } from "@/lib/db";
 import { softwareUpdates } from "@/lib/softwareUpdates";
 
 const preferencesSchema = z.strictObject({
@@ -32,8 +32,7 @@ export async function PUT(request: Request) {
   try {
     const preferences = preferencesSchema.safeParse(await readJson(request));
     if (!preferences.success) return NextResponse.json({ error: "input" }, { status: 400 });
-    const settings = await getSettings();
-    await saveSettings({ ...settings, general: { ...settings.general, ...preferences.data } });
+    await updateSettings((settings) => ({ ...settings, general: { ...settings.general, ...preferences.data } }));
     return NextResponse.json({ preferences: preferences.data }, {
       headers: { "Cache-Control": "private, no-store" },
     });

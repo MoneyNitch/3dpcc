@@ -1,15 +1,32 @@
 import { z } from "zod";
 import { ApiError, readBody } from "./api/http";
+import { CURRENCY_CODES } from "./currency";
 
 export const orderStatusSchema = z.enum(["open", "in_progress", "ready", "completed", "cancelled"]);
 export const orderPrioritySchema = z.enum(["low", "normal", "high"]);
+export const paymentStatusSchema = z.enum(["unpaid", "partial", "paid", "refunded"]);
+export const shippingStatusSchema = z.enum(["not_shipped", "shipped", "delivered", "pickup"]);
+const workflowFields = {
+  paymentStatus: paymentStatusSchema.optional(),
+  paymentMethod: z.string().trim().max(100).optional(),
+  paidAmount: z.number().finite().min(0).max(1_000_000_000).optional(),
+  paymentCurrency: z.enum(CURRENCY_CODES).optional(),
+  shippingStatus: shippingStatusSchema.optional(),
+  shippingMethod: z.string().trim().max(100).optional(),
+  trackingNumber: z.string().trim().max(200).optional(),
+};
 export const orderQuickUpdateSchema = z.strictObject({
+  expectedUpdatedAt: z.iso.datetime().optional(),
   status: orderStatusSchema.optional(),
   priority: orderPrioritySchema.optional(),
-}).refine((value) => value.status !== undefined || value.priority !== undefined);
+  ...workflowFields,
+}).refine((value) => Object.entries(value).some(([key, field]) => key !== "expectedUpdatedAt" && field !== undefined));
+export type OrderQuickUpdate = z.infer<typeof orderQuickUpdateSchema>;
 
 export const orderInputSchema = z.strictObject({
-  customerName: z.string().trim().min(1).max(200),
+  customerName: z.string().trim().min(1).max(403),
+  customerId: z.uuid().nullable().optional(),
+  ...workflowFields,
   status: orderStatusSchema,
   priority: orderPrioritySchema.default("normal"),
   printerId: z.string().trim().min(1).max(128).nullable().default(null),

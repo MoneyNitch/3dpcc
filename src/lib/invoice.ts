@@ -226,15 +226,12 @@ export function allocateInvoiceAmounts(totalAmount: number, shares: number[]): n
     ? nonNegativeShares.map((share) => share / shareTotal)
     : shares.map(() => 1 / shares.length);
   const totalCents = Math.round(totalAmount * 100);
-  let allocatedCents = 0;
-
-  return weights.map((weight, index) => {
-    const cents = index === weights.length - 1
-      ? totalCents - allocatedCents
-      : Math.round(totalCents * weight);
-    allocatedCents += cents;
-    return cents / 100;
-  });
+  const cents = weights.map((weight) => Math.floor(totalCents * weight));
+  const remaining = totalCents - cents.reduce((sum, amount) => sum + amount, 0);
+  const ranked = weights.map((weight, index) => ({ index, fraction: totalCents * weight - cents[index] }))
+    .sort((left, right) => right.fraction - left.fraction || right.index - left.index);
+  for (let index = 0; index < remaining; index++) cents[ranked[index].index]++;
+  return cents.map((amount) => amount / 100);
 }
 
 /** Renders a complete invoice document for the given paper format. */

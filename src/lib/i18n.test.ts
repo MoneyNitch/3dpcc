@@ -18,6 +18,44 @@ test("built-in role permission details are translated including superadmin user 
   }
 });
 
+test("customer, transport and order workflow labels are translated", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "customers.title", "customers.select", "customers.snapshotNote", "customers.save", "security.httpWarning",
+      "orders.workflow.title", "orders.workflow.manualNote", "orders.workflow.save", "orders.baseCostNote",
+      "orders.invoice.create", "orders.invoice.help", "orders.invoice.saveCalculation", "orders.invoice.noTemplate",
+      "orders.invoice.invalid", "orders.invoice.changed", "orders.invoice.numberChanged",
+      "orders.invoice.numberLimit", "orders.invoice.failed", "orders.invoice.missingPrint", "orders.invoice.notFound",
+      ...["unpaid", "partial", "paid", "refunded"].map((status) => `orders.payment.${status}`),
+      ...["not_shipped", "shipped", "delivered", "pickup"].map((status) => `orders.shippingStatus.${status}`),
+    ]) assert.notEqual(translate(language, key), key);
+  }
+});
+
+test("accessory page, order overview and label designer labels are translated", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "orders.overview.title", "orders.overview.active", "orders.overview.noPrice", "orders.overview.outdatedPrice",
+      "accessories.catalog", "accessories.subtitle", "accessories.search", "accessories.adjustmentHelp",
+      "labels.title", "labels.variables", "labels.save", "labels.printHelp", "labels.error.input",
+      "accessories.numericId", "labels.useNumericId", "labels.error.numericId",
+      "labels.type.text", "labels.type.qr", "labels.type.barcode", "labels.error.barcode", "labels.error.codeFit",
+    ]) assert.notEqual(translate(language, key), key);
+  }
+});
+
+test("product catalog and serial number labels are translated", () => {
+  for (const language of ["de", "en"]) {
+    for (const key of [
+      "nav.products", "products.title", "products.subtitle", "products.addType",
+      "products.prefix", "products.digits", "products.generate", "products.downloadCsv",
+      "products.error.invalid", "products.error.numberLimit",
+      "products.linkedPrint", "products.imageFromPrint", "products.imageCustom",
+      "products.imageNone", "products.saveAppearance", "products.error.imageRequired",
+    ]) assert.notEqual(translate(language, key), key);
+  }
+});
+
 test("manual print layout labels are translated in both languages", () => {
   for (const language of ["de", "en"]) {
     for (const key of [

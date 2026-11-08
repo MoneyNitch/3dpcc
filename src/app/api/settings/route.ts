@@ -64,23 +64,20 @@ export async function PUT(req: NextRequest) {
   if (duty !== undefined && (typeof duty !== "number" || !Number.isInteger(duty) || duty < 10 || duty > 100)) {
     return NextResponse.json({ error: "Die Hintergrund-Rechenleistung muss zwischen 10 und 100 liegen." }, { status: 400 });
   }
-  const next = migrateSettings(body);
   const currentSettings = await getSettings();
-  const retainedAccessoryIds = new Set(next.accessoryMaterials.map((item) => item.id));
-  if (currentSettings.accessoryMaterials.some((item) =>
-    item.stockQuantity > 0 && !retainedAccessoryIds.has(item.id)
-  )) {
-    return NextResponse.json({
-      error: "Zubehör mit vorhandenem Lagerbestand kann nicht entfernt werden. Buche den Bestand vorher aus.",
-    }, { status: 409 });
-  }
+  const next = {
+    ...migrateSettings(body),
+    accessoryMaterials: currentSettings.accessoryMaterials,
+    labelTemplates: currentSettings.labelTemplates,
+    productTypes: currentSettings.productTypes,
+  };
   if (authEnabled()) {
     const user = await requestIdentity(req, true);
     if (!canUpdateSettings(user, currentSettings, next)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
   }
-  await saveSettings(next);
+  await saveSettings(next, true);
   (await getPreviewQueue()).start();
   return NextResponse.json({ ok: true });
 }

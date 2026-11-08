@@ -8,8 +8,10 @@ import {
   calculateOrderSnapshot, orderCalculationMatchesItems,
   type OrderCalculationInputs, type OrderCalculationSnapshot,
 } from "@/lib/orderCalculation";
-import type { OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
+import type { DocumentNumberingSettings, InvoiceTemplate, OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
+import { OrderInvoiceExport } from "./OrderInvoiceExport";
 import { AccessoryStockAction } from "./AccessoryStockAction";
+import type { OrderQuickUpdate } from "@/lib/orders";
 
 const statuses: OrderStatus[] = ["open", "in_progress", "ready", "completed", "cancelled"];
 const priorities: OrderPriority[] = ["low", "normal", "high"];
@@ -61,11 +63,13 @@ function DecimalInput({ value, max, className, onChange }: {
   );
 }
 
-export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccessoryStockItems }: {
+export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccessoryStockItems, invoiceTemplates, invoiceNumbering }: {
   initialOrder: PrintOrder;
   initialSnapshot: OrderCalculationSnapshot;
   canEdit: boolean;
   hasAccessoryStockItems: boolean;
+  invoiceTemplates: InvoiceTemplate[];
+  invoiceNumbering: DocumentNumberingSettings;
 }) {
   const { t, lang } = useLocale();
   const [order, setOrder] = useState(initialOrder);
@@ -73,6 +77,15 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccesso
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
+  const [workflow, setWorkflow] = useState({
+    paymentStatus: initialOrder.paymentStatus ?? "unpaid",
+    paymentMethod: initialOrder.paymentMethod ?? "",
+    paidAmount: initialOrder.paidAmount ?? 0,
+    paymentCurrency: initialOrder.paymentCurrency ?? initialSnapshot.currency,
+    shippingStatus: initialOrder.shippingStatus ?? "not_shipped",
+    shippingMethod: initialOrder.shippingMethod ?? "",
+    trackingNumber: initialOrder.trackingNumber ?? "",
+  });
   const result = calculateOrderSnapshot(snapshot);
   const outdated = !orderCalculationMatchesItems(order, snapshot);
   const money = (value: number) => new Intl.NumberFormat(getIntlLocale(lang), {
@@ -82,15 +95,15 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccesso
   const inputClass = "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
   const cardClass = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800";
 
-  async function changeOrder(patch: { status?: OrderStatus; priority?: OrderPriority }) {
+  async function changeOrder(patch: OrderQuickUpdate) {
     setBusy(true);
     setMessage(null);
     try {
       const response = await fetch(`/api/orders/${order.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...patch, expectedUpdatedAt: order.updatedAt }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? t("orders.saveFailed"));
+      if (!response.ok) throw new Error(body.error ? t(body.error) : t("orders.saveFailed"));
       setOrder(body.order);
       setMessage({ error: false, text: t("orders.saved") });
     } catch (error) {
@@ -141,11 +154,21 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccesso
       <header className={cardClass}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">{order.customerName}</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold">ORD-{order.id.slice(0, 8).toUpperCase()}</h1>
+              <span className="text-sm text-slate-500 dark:text-slate-400">{order.customerName}</span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium dark:bg-slate-700">{t(`orders.status.${order.status}`)}</span>
+            </div>
             <p className="mt-1 break-all font-mono text-xs text-slate-500">{t("orders.orderId")}: {order.id}</p>
           </div>
-          {canEdit && <Link href={`/orders?edit=${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600">{t("orders.edit")}</Link>}
+          {canEdit && <div className="flex flex-wrap gap-2">
+            <OrderInvoiceExport order={order} templates={invoiceTemplates} numbering={invoiceNumbering}
+              disabled={busy || dirty || outdated || !order.calculation} />
+            <Link href={`/orders?edit=${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600">{t("orders.edit")}</Link>
+          </div>}
         </div>
+        {canEdit && (dirty || outdated || !order.calculation) && <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">{t("orders.invoice.saveCalculation")}</p>}
+        {canEdit && !invoiceTemplates.length && <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">{t("orders.invoice.noTemplate")}</p>}
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="text-sm">{t("orders.status")}
             <select className={inputClass} value={order.status} disabled={!canEdit || busy}
@@ -177,7 +200,97 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccesso
         </a>}
       </header>
 
-      <section className={cardClass} aria-labelledby="order-history-heading">
+      <section className={`${cardClass} grid gap-4 sm:grid-cols-3`} aria-label={t("orders.workflow.title")}>
+        {[
+          { label: "orders.workflow.payment", value: `orders.payment.${order.paymentStatus ?? "unpaid"}`,
+            done: order.paymentStatus === "paid" },
+          { label: "orders.workflow.production", value: `orders.status.${order.status}`,
+            done: order.status === "ready" || order.status === "completed" },
+          { label: "orders.workflow.shipping", value: `orders.shippingStatus.${order.shippingStatus ?? "not_shipped"}`,
+            done: order.shippingStatus === "delivered" || order.shippingStatus === "pickup" },
+        ].map((step, index) => <div key={step.label} className="flex items-center gap-3">
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${step.done ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300" : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200"}`}>{step.done ? "✓" : index + 1}</span>
+          <div><p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{t(step.label)}</p><p className="text-sm font-medium">{t(step.value)}</p></div>
+        </div>)}
+      </section>
+
+      <section className={cardClass}>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">{t("orders.items")} <span className="text-sm font-normal text-slate-500">({order.items.length})</span></h2>
+          {canEdit && <Link href={`/orders?edit=${order.id}`} className="rounded-full bg-slate-100 px-3 py-2 text-sm dark:bg-slate-700">{t("orders.editItems")}</Link>}
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-900/50 dark:text-slate-400">
+              <tr><th className="rounded-l-lg p-3">{t("orders.product")}</th><th className="p-3 text-right">{t("extra.quantity")}</th>
+                <th className="p-3 text-right">{t("orders.unitBaseCost")}</th><th className="rounded-r-lg p-3 text-right">{t("orders.positionBaseCost")}</th></tr>
+            </thead>
+            <tbody>{result.items.map((item) => <tr key={item.printId} className="border-b border-slate-100 dark:border-slate-700">
+              <td className="p-3"><Link href={`/prints/${item.printId}`} className="font-medium text-orange-700 hover:underline dark:text-orange-300">{item.printName}</Link></td>
+              <td className="p-3 text-right">{item.quantity}</td><td className="whitespace-nowrap p-3 text-right">{money(item.totalPrice / item.quantity)}</td>
+              <td className="whitespace-nowrap p-3 text-right font-semibold">{money(item.totalPrice)}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{t("orders.baseCostNote")}</p>
+        <dl className="ml-auto mt-4 flex max-w-sm flex-col gap-2 text-sm">
+          {[
+            { label: "cost.subtotal", value: result.totals.priceBeforeVat - result.totals.quantityDiscountAmount - result.totals.shippingCost },
+            { label: "orders.shipping", value: result.totals.shippingCost },
+            { label: "cost.tax", value: result.totals.vatAmount },
+          ].map((row) => <div key={row.label} className="flex justify-between gap-4"><dt className="text-slate-500 dark:text-slate-400">{t(row.label)}</dt><dd>{money(row.value)}</dd></div>)}
+          <div className="flex justify-between gap-4 border-t border-slate-200 pt-2 font-bold dark:border-slate-700"><dt>{t("cost.totalPrice")}</dt><dd>{money(result.totals.totalPrice)}</dd></div>
+        </dl>
+        {(dirty || outdated || !order.calculation) && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{t("orders.previewTotals")}</p>}
+      </section>
+
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col gap-6">
+      <form className={cardClass} onSubmit={(event) => { event.preventDefault(); void changeOrder(workflow); }}>
+        <h2 className="text-lg font-semibold">{t("orders.workflow.title")}</h2>
+        <fieldset disabled={!canEdit || busy} className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="text-sm">{t("orders.workflow.payment")}
+            <select className={inputClass} value={workflow.paymentStatus} onChange={(event) => {
+              const status = (["unpaid", "partial", "paid", "refunded"] as const).find((value) => value === event.target.value);
+              if (status) setWorkflow((current) => ({ ...current, paymentStatus: status }));
+            }}>{(["unpaid", "partial", "paid", "refunded"] as const).map((status) => <option key={status} value={status}>{t(`orders.payment.${status}`)}</option>)}</select>
+          </label>
+          <label className="text-sm">{t("orders.workflow.paymentMethod")}
+            <input className={inputClass} maxLength={100} value={workflow.paymentMethod} onChange={(event) => setWorkflow((current) => ({ ...current, paymentMethod: event.target.value }))} />
+          </label>
+          <label className="text-sm">{t("orders.workflow.paidAmount")} ({workflow.paymentCurrency})
+            <DecimalInput className={inputClass} max={1_000_000_000} value={workflow.paidAmount} onChange={(paidAmount) => setWorkflow((current) => ({ ...current, paidAmount }))} />
+          </label>
+          <label className="text-sm">{t("orders.workflow.shipping")}
+            <select className={inputClass} value={workflow.shippingStatus} onChange={(event) => {
+              const status = (["not_shipped", "shipped", "delivered", "pickup"] as const).find((value) => value === event.target.value);
+              if (status) setWorkflow((current) => ({ ...current, shippingStatus: status }));
+            }}>{(["not_shipped", "shipped", "delivered", "pickup"] as const).map((status) => <option key={status} value={status}>{t(`orders.shippingStatus.${status}`)}</option>)}</select>
+          </label>
+          <label className="text-sm">{t("orders.workflow.shippingMethod")}
+            <input className={inputClass} maxLength={100} value={workflow.shippingMethod} onChange={(event) => setWorkflow((current) => ({ ...current, shippingMethod: event.target.value }))} />
+          </label>
+          <label className="text-sm">{t("orders.workflow.tracking")}
+            <input className={inputClass} maxLength={200} value={workflow.trackingNumber} onChange={(event) => setWorkflow((current) => ({ ...current, trackingNumber: event.target.value }))} />
+          </label>
+          {canEdit && <button type="submit" className="justify-self-start rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white sm:col-span-2">{t("orders.workflow.save")}</button>}
+        </fieldset>
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{t("orders.workflow.manualNote")}</p>
+      </form>
+      <section className={cardClass}>
+        <h2 className="text-lg font-semibold">{t("orders.customerContact")}</h2>
+        <p className="mt-3 font-medium">{order.customerName}</p>
+        {order.customerSnapshot && <dl className="mt-3 space-y-3 text-sm">
+          {(["email", "phone", "billingAddress", "shippingAddress"] as const).map((field) => order.customerSnapshot?.[field] && <div key={field}>
+            <dt className="text-xs text-slate-500 dark:text-slate-400">{t(`customers.${field}`)}</dt>
+            <dd className="whitespace-pre-wrap break-words">{order.customerSnapshot[field]}</dd>
+          </div>)}
+        </dl>}
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{t(order.customerSnapshot ? "customers.snapshotNote" : "customers.noLinkedCustomer")}</p>
+        {order.customerId && <Link href="/customers" className="mt-3 inline-block text-sm text-orange-700 hover:underline dark:text-orange-300">{t("customers.manage")}</Link>}
+      </section>
+      </div>
+      <section className={`${cardClass} min-w-0`} aria-labelledby="order-history-heading">
         <h2 id="order-history-heading" className="text-lg font-semibold">{t("orders.history.title")}</h2>
         <ol className="mt-4 flex flex-col gap-3">
           {(order.history ?? [
@@ -185,13 +298,14 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit, hasAccesso
             { type: "updated" as const, at: order.updatedAt },
             ...(order.status === "completed" ? [{ type: "completed" as const, at: order.updatedAt }] : []),
           ]).map((entry, index) => (
-            <li key={`${entry.type}:${entry.at}:${index}`} className="flex flex-wrap justify-between gap-2 text-sm">
-              <span>{t(`orders.history.${entry.type}`)}</span>
+            <li key={`${entry.type}:${entry.at}:${index}`} className="flex flex-col gap-1 border-l-2 border-green-200 pl-3 text-sm dark:border-green-900">
+              <span className="font-medium">{t(`orders.history.${entry.type}`)}</span>
               <time dateTime={entry.at} className="text-slate-500 dark:text-slate-400">{date(entry.at)}</time>
             </li>
           ))}
         </ol>
       </section>
+      </div>
 
       {message && <p role={message.error ? "alert" : "status"}
         className={`text-sm ${message.error ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}>{message.text}</p>}

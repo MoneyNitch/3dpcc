@@ -1,8 +1,9 @@
 import { Pool } from "pg";
-import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import type { AccessoryStockMovement, AppSettings, Customer, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { defaultSettings, materialBookingActiveKey, migrateSettings, preserveAccessoryStock, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 async function ensureSchema(pool: Pool): Promise<void> {
+  await pool.query("CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, data TEXT NOT NULL)");
   await pool.query(`
     CREATE TABLE IF NOT EXISTS prints (
       id TEXT PRIMARY KEY,
@@ -80,25 +81,33 @@ export function createPostgresStore(connectionString?: string): DataStore {
     return migrateSettings(JSON.parse(rows[0].data));
   }
 
-  async function saveSettings(settings: AppSettings): Promise<void> {
+  async function updateSettings(update: (current: AppSettings) => AppSettings): Promise<AppSettings> {
     await ready;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       const { rows } = await client.query<{ data: string }>("SELECT data FROM settings WHERE id = 1 FOR UPDATE");
-      const next = rows[0] ? preserveAccessoryStock(settings, migrateSettings(JSON.parse(rows[0].data))) : settings;
+      const next = update(rows[0] ? migrateSettings(JSON.parse(rows[0].data)) : structuredClone(defaultSettings));
       await client.query(
         `INSERT INTO settings (id, data) VALUES (1, $1)
          ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
         [JSON.stringify(next)]
       );
       await client.query("COMMIT");
+      return next;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
     }
+
+  }
+
+  async function saveSettings(settings: AppSettings, preserveManaged = false): Promise<void> {
+    await updateSettings((current) => preserveManaged
+      ? { ...settings, nextAccessoryNumber: current.nextAccessoryNumber, accessoryMaterials: current.accessoryMaterials, labelTemplates: current.labelTemplates, productTypes: current.productTypes }
+      : preserveAccessoryStock(settings, current));
   }
 
   async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -208,12 +217,19 @@ export function createPostgresStore(connectionString?: string): DataStore {
     return rows.map((row) => JSON.parse(row.data) as PrintOrder);
   }
 
-  async function saveOrder(order: PrintOrder): Promise<void> {
+  async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): Promise<boolean> {
     await ready;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(
+      if (expectedUpdatedAt) {
+        const result = await client.query("UPDATE orders SET updated_at = $1, data = $2 WHERE id = $3 AND updated_at = $4",
+          [order.updatedAt, JSON.stringify(order), order.id, expectedUpdatedAt]);
+        if (result.rowCount !== 1) {
+          await client.query("ROLLBACK");
+          return false;
+        }
+      } else await client.query(
         `INSERT INTO orders (id, updated_at, data) VALUES ($1, $2, $3)
          ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at, data = EXCLUDED.data`,
         [order.id, order.updatedAt, JSON.stringify(order)]
@@ -225,6 +241,7 @@ export function createPostgresStore(connectionString?: string): DataStore {
         ]);
       }
       await client.query("COMMIT");
+      return true;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -392,6 +409,10 @@ export function createPostgresStore(connectionString?: string): DataStore {
       await client.query("DELETE FROM orders");
       await client.query("DELETE FROM settings");
       await client.query("INSERT INTO settings (id, data) VALUES (1, $1)", [JSON.stringify(data.settings)]);
+      await client.query("DELETE FROM customers");
+      for (const customer of data.customers ?? []) {
+        await client.query("INSERT INTO customers (id, updated_at, data) VALUES ($1, $2, $3)", [customer.id, customer.updatedAt, JSON.stringify(customer)]);
+      }
       for (const entry of data.prints) {
         await client.query(
           "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES ($1, $2, $3, $4, $5)",
@@ -435,7 +456,26 @@ export function createPostgresStore(connectionString?: string): DataStore {
     }
   }
 
+  async function listCustomers(): Promise<Customer[]> {
+    await ready;
+    const { rows } = await pool.query<{ data: string }>("SELECT data FROM customers ORDER BY updated_at DESC");
+    return rows.map((row) => JSON.parse(row.data) as Customer);
+  }
+
+  async function saveCustomer(customer: Customer, expectedUpdatedAt?: string): Promise<boolean> {
+    await ready;
+    const result = expectedUpdatedAt
+      ? await pool.query("UPDATE customers SET updated_at = $1, data = $2 WHERE id = $3 AND updated_at = $4",
+        [customer.updatedAt, JSON.stringify(customer), customer.id, expectedUpdatedAt])
+      : await pool.query("INSERT INTO customers (id, updated_at, data) VALUES ($1, $2, $3) ON CONFLICT(id) DO NOTHING",
+        [customer.id, customer.updatedAt, JSON.stringify(customer)]);
+    return result.rowCount === 1;
+  }
+
   return {
+    updateSettings,
+    listCustomers,
+    saveCustomer,
     getSettings,
     saveSettings,
     insertPrint,

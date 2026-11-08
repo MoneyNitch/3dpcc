@@ -4,6 +4,32 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/lib/locale";
+import { useSoftwareUpdate } from "@/lib/softwareUpdateContext";
+import packageJson from "../../package.json";
+
+export function UserMenuVersion({ showSettings, onNavigate }: {
+  showSettings: boolean;
+  onNavigate: () => void;
+}) {
+  const { t } = useLocale();
+  const { update } = useSoftwareUpdate();
+  const available = update?.status === "available" && update.version;
+  return (
+    <div className="mt-1 border-t border-slate-200 px-4 py-3 text-xs dark:border-slate-700">
+      <p className="text-slate-500 dark:text-slate-400">{t("settings.version")}: {packageJson.version}</p>
+      {available && (showSettings ? (
+        <Link role="menuitem" href="/settings?tab=software" prefetch={false} onClick={onNavigate}
+          className="mt-2 block font-medium text-orange-700 hover:underline dark:text-orange-300">
+          {t("software.update.available", { version: update.version ?? "" })}
+        </Link>
+      ) : (
+        <p role="status" className="mt-2 font-medium text-orange-700 dark:text-orange-300">
+          {t("software.update.available", { version: update.version ?? "" })}
+        </p>
+      ))}
+    </div>
+  );
+}
 
 export function UserMenu({
   username,
@@ -82,6 +108,7 @@ export function UserMenu({
           <Link role="menuitem" href="/account" onClick={() => setOpen(false)} className={itemClass}>{t("auth.changePassword")}</Link>
           <button role="menuitem" type="button" disabled={busy} onClick={() => void logout()} className={itemClass}>{t("auth.logout")}</button>
           {error && <p role="alert" className="px-4 py-2 text-xs text-red-600 dark:text-red-400">{t("auth.error.serverError")}</p>}
+          <UserMenuVersion showSettings={showSettings} onNavigate={() => setOpen(false)} />
         </div>
       )}
     </div>

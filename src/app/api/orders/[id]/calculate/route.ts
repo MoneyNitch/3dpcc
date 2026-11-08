@@ -77,7 +77,8 @@ export async function PUT(request: Request, { params }: Context) {
       items: basis.items.map((item) => refresh ? item : { ...item, ...costsById.get(item.printId) }),
     });
     const updated = { ...order, calculation: snapshot, updatedAt: snapshot.savedAt };
-    const saved = await saveOrder(updated);
+    const saved = await saveOrder(updated, expectedUpdatedAt);
+    if (!saved) throw new ApiError(409, "conflict", "Der Auftrag wurde geändert. Bitte die Seite neu laden.");
     return NextResponse.json({ order: saved }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return handleError(error);

@@ -22,5 +22,6 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     (await getPrintCostInputs(item.printId))?.extraCosts.some((cost) => cost.accessoryId) ?? false
   ))).some(Boolean);
   return <OrderDetail key={order.updatedAt} initialOrder={order} initialSnapshot={snapshot}
+    invoiceTemplates={settings.invoiceTemplates} invoiceNumbering={settings.numbering.invoice}
     canEdit={hasPermission(user, "documents.write", authEnabled())} hasAccessoryStockItems={hasAccessoryStockItems} />;
 }

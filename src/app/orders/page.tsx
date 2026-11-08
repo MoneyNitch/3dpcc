@@ -1,7 +1,7 @@
 import { OrderManager } from "@/components/OrderManager";
 import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
-import { getSettings, listOrders, listPrints } from "@/lib/db";
+import { getSettings, listCustomers, listOrders, listPrints } from "@/lib/db";
 import { translate } from "@/lib/i18n";
 import { requireSetupComplete } from "@/lib/setupGuard";
 import { localDateKey } from "@/lib/orderFilters";
@@ -12,7 +12,7 @@ export default async function OrdersPage({ searchParams }: {
   searchParams: Promise<{ edit?: string }>;
 }) {
   const user = await requirePage("documents.read");
-  const [settings, orders, prints] = await Promise.all([getSettings(), listOrders(), listPrints()]);
+  const [settings, orders, prints, customers] = await Promise.all([getSettings(), listOrders(), listPrints(), listCustomers()]);
   requireSetupComplete(settings);
   const lang = settings.general.language;
   const { edit } = await searchParams;
@@ -28,6 +28,7 @@ export default async function OrdersPage({ searchParams }: {
         initialEditingOrderId={edit}
         initialToday={localDateKey(new Date())}
         initialOrders={orders}
+        customers={customers.map(({ id, name, company, archived }) => ({ id, name, company, archived }))}
         prints={prints.map((print) => ({
           id: print.id,
           name: print.displayName ?? print.fileName,

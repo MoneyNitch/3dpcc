@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError } from "@/lib/api/http";
-import { deleteOrder, getSettings, listPrints, listOrders, saveOrder } from "@/lib/db";
+import { deleteOrder, getSettings, listCustomers, listPrints, listOrders, saveOrder } from "@/lib/db";
+import { orderCustomer } from "@/lib/customers";
 import { authorize } from "@/lib/auth/server";
 import { orderInputSchema, orderQuickUpdateSchema, readOrderBody } from "@/lib/orders";
 import { orderGcodeFiles } from "@/lib/orderGcode";
@@ -31,12 +32,17 @@ export async function PATCH(
   }
   const order = (await listOrders()).find((item) => item.id === id);
   if (!order) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
+  const { expectedUpdatedAt, ...patch } = parsed.data;
+  if (expectedUpdatedAt && expectedUpdatedAt !== order.updatedAt) {
+    return NextResponse.json({ error: "orders.workflow.conflict" }, { status: 409 });
+  }
   const updated: PrintOrder = {
     ...order,
-    ...parsed.data,
+    ...patch,
     updatedAt: new Date().toISOString(),
   };
-  const saved = await saveOrder(updated);
+  const saved = expectedUpdatedAt ? await saveOrder(updated, expectedUpdatedAt) : await saveOrder(updated);
+  if (!saved) return NextResponse.json({ error: "orders.workflow.conflict" }, { status: 409 });
   return NextResponse.json({ order: saved }, { headers: { "Cache-Control": "private, no-store" } });
 }
 
@@ -72,9 +78,17 @@ export async function PUT(
   if (parsed.data.printerId && !settings.printers.some((printer) => printer.id === parsed.data.printerId)) {
     return NextResponse.json({ error: "Der ausgewählte Drucker wurde nicht gefunden." }, { status: 400 });
   }
+  const customerId = parsed.data.customerId === undefined ? order.customerId : parsed.data.customerId;
+  const customer = customerId ? (await listCustomers()).find((entry) =>
+    entry.id === customerId && (!entry.archived || order.customerId === customerId)) : undefined;
+  if (customerId && !customer) {
+    return NextResponse.json({ error: "customers.error.notFound" }, { status: 400 });
+  }
   const updated: PrintOrder = {
     ...order,
     ...parsed.data,
+    ...orderCustomer(customer, order),
+    customerName: customer ? orderCustomer(customer, order).customerName : parsed.data.customerName,
     queuePosition: parsed.data.printerId === (order.printerId ?? null) ? order.queuePosition : undefined,
     updatedAt: new Date().toISOString(),
   };

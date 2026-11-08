@@ -87,7 +87,22 @@ export interface ParsedPrint {
 
 export type OrderStatus = "open" | "in_progress" | "ready" | "completed" | "cancelled";
 export type OrderPriority = "low" | "normal" | "high";
-export type OrderHistoryEventType = "created" | "updated" | "completed";
+export interface Customer {
+  id: string;
+  name: string;
+  company: string;
+  email: string;
+  phone: string;
+  billingAddress: string;
+  shippingAddress: string;
+  notes: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export type PaymentStatus = "unpaid" | "partial" | "paid" | "refunded";
+export type ShippingStatus = "not_shipped" | "shipped" | "delivered" | "pickup";
+export type OrderHistoryEventType = "created" | "updated" | "completed" | "payment_updated" | "shipping_updated";
 
 export interface OrderHistoryEntry {
   type: OrderHistoryEventType;
@@ -97,6 +112,15 @@ export interface OrderHistoryEntry {
 export interface PrintOrder {
   id: string;
   customerName: string;
+  customerId?: string | null;
+  customerSnapshot?: Customer;
+  paymentStatus?: PaymentStatus;
+  paymentMethod?: string;
+  paidAmount?: number;
+  paymentCurrency?: Currency;
+  shippingStatus?: ShippingStatus;
+  shippingMethod?: string;
+  trackingNumber?: string;
   status: OrderStatus;
   priority?: OrderPriority;
   printerId?: string | null;
@@ -140,6 +164,7 @@ export interface Material {
 /** Purchased accessory such as screws, nuts, magnets, or glue. */
 export interface AccessoryMaterial {
   id: string;
+  numericId?: number;
   name: string;
   pricePerPack: number;
   unitsPerPack: number;
@@ -230,6 +255,9 @@ export interface DocumentNumberingSettings {
 }
 
 export interface AppSettings {
+  nextAccessoryNumber: number;
+  labelTemplates: import("./labelTemplates").LabelTemplate[];
+  productTypes: ProductType[];
   materials: Material[];
   accessoryMaterials: AccessoryMaterial[];
   invoiceTemplates: InvoiceTemplate[];
@@ -245,6 +273,18 @@ export interface AppSettings {
   };
   /** True once the user has gone through Settings at least once after a fresh install. */
   setupCompleted: boolean;
+}
+
+export interface ProductType {
+  id: string;
+  name: string;
+  prefix: string;
+  digits: number;
+  nextNumber: number;
+  fileName: string;
+  linkedPrintId: string | null;
+  imageMode: "print" | "custom" | "none";
+  imageBase64: string | null;
 }
 
 export type Language = string;

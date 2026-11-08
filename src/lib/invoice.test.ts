@@ -50,6 +50,9 @@ test("allocated all-plate invoice positions add up exactly to the selected total
   const amounts = allocateInvoiceAmounts(167.45, [28.14, 17.2, 33.65, 12.57, 8.19]);
   assert.equal(amounts.reduce((sum, amount) => sum + amount, 0), 167.45);
   assert.deepEqual(allocateInvoiceAmounts(10, [0, 0, 0]), [3.33, 3.33, 3.34]);
+  const tiny = allocateInvoiceAmounts(0.5, Array(100).fill(1));
+  assert.ok(tiny.every((amount) => amount >= 0));
+  assert.equal(tiny.reduce((sum, amount) => sum + Math.round(amount * 100), 0), 50);
 });
 
 test("document preview renders current data and layout without triggering printing", async () => {

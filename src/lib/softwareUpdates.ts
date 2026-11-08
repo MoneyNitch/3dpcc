@@ -201,7 +201,12 @@ export function createSoftwareUpdates({
     };
   }
 
-  return { getInfo, configure };
+  function getCachedUpdate(preferences: GithubPreferences): SoftwareInfo["update"] | null {
+    if (!preferences.checkGithubUpdates) return { status: "disabled" };
+    return update.cached && update.cached.expiresAt > now() ? update.cached.value : null;
+  }
+
+  return { getInfo, configure, getCachedUpdate };
 }
 
 const globalForUpdates = globalThis as typeof globalThis & {

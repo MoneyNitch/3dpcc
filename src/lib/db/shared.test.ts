@@ -1,9 +1,47 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultSettings, migrateSettings, preserveAccessoryStock } from "./shared";
+import { assignAccessoryNumbers, defaultSettings, migrateSettings, preserveAccessoryStock } from "./shared";
 
 test("enables 3D previews by default", () => {
   assert.equal(defaultSettings.general.enable3dPreview, true);
+});
+
+test("migrates and preserves the product catalog through ordinary settings saves", () => {
+  const legacy = migrateSettings({ ...defaultSettings, productTypes: undefined });
+  assert.deepEqual(legacy.productTypes, []);
+  const product = {
+    id: "12345678-1234-4234-8234-123456789abc",
+    name: "Lamp",
+    prefix: "LAMP-",
+    digits: 5,
+    nextNumber: 8,
+    fileName: "lamp.3mf",
+    linkedPrintId: null,
+    imageMode: "print" as const,
+    imageBase64: null,
+  };
+  const current = { ...defaultSettings, productTypes: [product] };
+  assert.deepEqual(preserveAccessoryStock(defaultSettings, current).productTypes, [{
+    ...product, linkedPrintId: null, imageMode: "print", imageBase64: null,
+  }]);
+});
+
+test("legacy accessory numbers are sequential, stable and never reused after deletion", () => {
+  const item = { name: "Clips", pricePerPack: 1, unitsPerPack: 1, stockQuantity: 0 };
+  const legacy = migrateSettings({ ...defaultSettings, nextAccessoryNumber: undefined,
+    accessoryMaterials: [{ ...item, id: "a" }, { ...item, id: "b" }] });
+  assert.deepEqual(legacy.accessoryMaterials.map((entry) => entry.numericId), [1, 2]);
+  assert.equal(legacy.nextAccessoryNumber, 3);
+  assert.deepEqual(migrateSettings(JSON.parse(JSON.stringify(legacy))), legacy);
+  const deleted = { ...legacy, accessoryMaterials: [] };
+  const created = assignAccessoryNumbers({ ...deleted, accessoryMaterials: [{ ...item, id: "c" }] });
+  assert.equal(created.accessoryMaterials[0].numericId, 3);
+  const stale = preserveAccessoryStock({ ...defaultSettings, accessoryMaterials: [{ ...item, id: "c", numericId: 1 }] }, created);
+  assert.equal(stale.accessoryMaterials[0].numericId, 3);
+  assert.equal(stale.nextAccessoryNumber, 4);
+  assert.throws(() => assignAccessoryNumbers({ ...legacy, accessoryMaterials: [
+    { ...item, id: "x", numericId: 1 }, { ...item, id: "y", numericId: 1 },
+  ] }), /duplicate/);
 });
 
 test("GitHub functions default to enabled but disabled choices persist through migration", () => {

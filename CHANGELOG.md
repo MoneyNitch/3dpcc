@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- The order overview has clickable status summaries, separate overview/planning
+  views, grouped filters and compact cards with saved prices and payment status.
+- Accessory management moves from Settings to its own navigation page with search,
+  stock filters, article cards, separate confirmed stock changes and per-item history.
 - GitHub preference switches save only their two supported fields, so toggling
   them is no longer rejected because of unrelated general settings.
 - Settings render the changelog as formatted Markdown, with a separate card for
@@ -12,6 +16,28 @@
   details, individual filament cards, a total-weight badge and a clearer image input.
 
 ### Added
+- Order details can generate invoices from saved order pricing and contact snapshots,
+  using existing templates with preview, HTML download and printing. Automatic
+  numbers are reserved atomically; outdated/unsaved calculations cannot be invoiced.
+- Accessories receive permanent sequential numeric IDs, including existing articles.
+  The label designer supports `{{numericId}}` for text, QR and Code 128;
+  deleted numbers are not reused and numbering is included in backups.
+- A local accessory label designer supports saved millimeter-sized templates,
+  draggable text, QR and Code 128 elements, name/ID variables, custom code content
+  and single-label printing. Templates are included in settings migration, backups
+  and database transfers; old Settings saves do not overwrite the separate catalog.
+- Customer management includes contacts, billing/shipping addresses, internal
+  notes, search, archiving/reactivation and related orders. Order customer
+  assignment retains a contact snapshot. Customers are included in all database
+  backends, database transfers and encrypted backups.
+- Order details use separated article, workflow, contact and activity cards.
+  Payment status/method/amount and shipping status/method/tracking number can be
+  recorded manually without automatic payment processing or stock reservation.
+- Customer management, API-key management and API documentation recommend HTTPS
+  when opened over HTTP. Reverse-proxy TLS configuration is documented.
+- The user dropdown shows the installed version at the bottom and any known newer
+  stable release, with a Settings link when permitted. It reuses the update cache
+  and Settings checks without making additional GitHub requests.
 - Settings display the bundled changelog or the latest GitHub default-branch
   changelog and notify about newer stable GitHub releases. Two independently
   persisted switches control the online features (enabled by default). Disabled

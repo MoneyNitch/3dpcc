@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
-import type { AccessoryStockMovement, AppSettings, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import type { AccessoryStockMovement, AppSettings, Customer, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { defaultSettings, materialBookingActiveKey, migrateSettings, preserveAccessoryStock, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 function openDb(): Database.Database {
@@ -22,6 +22,11 @@ function openDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      updated_at TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS prints (
       id TEXT PRIMARY KEY,
       file_name TEXT NOT NULL,
@@ -70,6 +75,20 @@ function openDb(): Database.Database {
 export function createSqliteStore(): DataStore {
   const db = openDb();
 
+  async function listCustomers(): Promise<Customer[]> {
+    return (db.prepare("SELECT data FROM customers ORDER BY updated_at DESC").all() as { data: string }[])
+      .map((row) => JSON.parse(row.data) as Customer);
+  }
+
+  async function saveCustomer(customer: Customer, expectedUpdatedAt?: string): Promise<boolean> {
+    if (expectedUpdatedAt) {
+      return db.prepare("UPDATE customers SET updated_at = ?, data = ? WHERE id = ? AND updated_at = ?")
+        .run(customer.updatedAt, JSON.stringify(customer), customer.id, expectedUpdatedAt).changes === 1;
+    }
+    return db.prepare("INSERT INTO customers (id, updated_at, data) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING")
+      .run(customer.id, customer.updatedAt, JSON.stringify(customer)).changes === 1;
+  }
+
   async function getSettings(): Promise<AppSettings> {
     const row = db.prepare("SELECT data FROM settings WHERE id = 1").get() as
       | { data: string }
@@ -81,15 +100,22 @@ export function createSqliteStore(): DataStore {
     return migrateSettings(JSON.parse(row.data));
   }
 
-  async function saveSettings(settings: AppSettings): Promise<void> {
+  async function updateSettings(update: (current: AppSettings) => AppSettings): Promise<AppSettings> {
     const save = db.transaction(() => {
       const row = db.prepare("SELECT data FROM settings WHERE id = 1").get() as { data: string } | undefined;
-      const next = row ? preserveAccessoryStock(settings, migrateSettings(JSON.parse(row.data))) : settings;
+      const next = update(row ? migrateSettings(JSON.parse(row.data)) : structuredClone(defaultSettings));
       db.prepare(
         "INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data"
       ).run(JSON.stringify(next));
+      return next;
     });
-    save.immediate();
+    return save.immediate();
+  }
+
+  async function saveSettings(settings: AppSettings, preserveManaged = false): Promise<void> {
+    await updateSettings((current) => preserveManaged
+      ? { ...settings, nextAccessoryNumber: current.nextAccessoryNumber, accessoryMaterials: current.accessoryMaterials, labelTemplates: current.labelTemplates, productTypes: current.productTypes }
+      : preserveAccessoryStock(settings, current));
   }
 
   async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -182,14 +208,19 @@ export function createSqliteStore(): DataStore {
       .map((row) => JSON.parse(row.data) as PrintOrder);
   }
 
-  async function saveOrder(order: PrintOrder): Promise<void> {
-    db.transaction(() => {
-      db.prepare(
+  async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): Promise<boolean> {
+    return db.transaction(() => {
+      if (expectedUpdatedAt) {
+        const result = db.prepare("UPDATE orders SET updated_at = ?, data = ? WHERE id = ? AND updated_at = ?")
+          .run(order.updatedAt, JSON.stringify(order), order.id, expectedUpdatedAt);
+        if (result.changes !== 1) return false;
+      } else db.prepare(
         "INSERT INTO orders (id, updated_at, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data = excluded.data"
       ).run(order.id, order.updatedAt, JSON.stringify(order));
       db.prepare("DELETE FROM order_items WHERE order_id = ?").run(order.id);
       const itemStatement = db.prepare("INSERT INTO order_items (order_id, print_id, quantity) VALUES (?, ?, ?)");
       for (const item of order.items) itemStatement.run(order.id, item.printId, item.quantity);
+      return true;
     }).immediate();
   }
 
@@ -294,6 +325,9 @@ export function createSqliteStore(): DataStore {
     const replace = db.transaction(() => {
       db.exec("DELETE FROM order_items; DELETE FROM material_bookings; DELETE FROM accessory_stock_movements; DELETE FROM print_models; DELETE FROM prints; DELETE FROM orders; DELETE FROM settings;");
       db.prepare("INSERT INTO settings (id, data) VALUES (1, ?)").run(JSON.stringify(data.settings));
+      db.exec("DELETE FROM customers");
+      const customerStatement = db.prepare("INSERT INTO customers (id, updated_at, data) VALUES (?, ?, ?)");
+      for (const customer of data.customers ?? []) customerStatement.run(customer.id, customer.updatedAt, JSON.stringify(customer));
       const printStatement = db.prepare(
         "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES (?, ?, ?, ?, ?)"
       );
@@ -333,6 +367,9 @@ export function createSqliteStore(): DataStore {
   }
 
   return {
+    updateSettings,
+    listCustomers,
+    saveCustomer,
     getSettings,
     saveSettings,
     insertPrint,

@@ -24,7 +24,7 @@ export function bearerKey(request: Request, keys: string[]): string | undefined 
 }
 
 export function docsCookie(request: Request, value: string, maxAge = sessionSeconds): string {
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const secure = new URL(request.url).protocol === "https:" || process.env.AUTH_COOKIE_SECURE === "true" ? "; Secure" : "";
   return `${docsCookieName}=${value}; Path=/api/v1/docs; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
 }
 

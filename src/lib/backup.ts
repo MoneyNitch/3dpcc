@@ -27,13 +27,14 @@ import type { ApplicationDataSnapshot } from "./db/shared";
 import type { MaterialBooking, PrintOrder } from "./types";
 import { orderCalculationSnapshotSchema } from "./orderCalculation";
 import { materialBookingSchema } from "./externalFilaments";
+import { customerSchema } from "./customers";
 
 const magic = Buffer.from("3DPCCBACKUP1", "ascii");
 export const maximumBackupBytes = 512 * 1024 * 1024;
 const maximumEntries = 50_000;
 const maximumUncompressedBytes = 512 * 1024 * 1024;
 const dataDirectory = path.join(process.cwd(), "data");
-const directoryTargets = ["original-archives", "order-gcode", "preview-jobs"] as const;
+const directoryTargets = ["original-archives", "order-gcode", "preview-jobs", "product-files"] as const;
 
 export class BackupError extends Error {}
 
@@ -125,6 +126,7 @@ export async function createBackup(passphrase: string): Promise<Buffer> {
       })),
     })),
     orders: snapshot.orders,
+    customers: snapshot.customers ?? [],
     materialBookings: snapshot.materialBookings,
     accessoryStockMovements: snapshot.accessoryStockMovements,
     filamentConnections: getFilamentConnections(),
@@ -160,6 +162,11 @@ function safeArchivePath(name: string): boolean {
 }
 
 function isAllowedLocalPath(name: string): boolean {
+  const productPrefix = "local/product-files/";
+  if (name.startsWith(productPrefix)) {
+    return /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.3mf$/i
+      .test(name.slice(productPrefix.length));
+  }
   const orderGcodePrefix = "local/order-gcode/";
   if (name.startsWith(orderGcodePrefix)) {
     return /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.gcode$/i
@@ -253,6 +260,7 @@ function parseBackupData(zip: AdmZip): BackupData {
   }
 
   const orderSchema = orderInputSchema.extend({
+    customerSnapshot: customerSchema.optional(),
     id: z.uuid(),
     queuePosition: z.number().int().nonnegative().optional(),
     calculation: orderCalculationSnapshotSchema.optional(),
@@ -263,7 +271,7 @@ function parseBackupData(zip: AdmZip): BackupData {
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
     history: z.array(z.strictObject({
-      type: z.enum(["created", "updated", "completed"]),
+      type: z.enum(["created", "updated", "completed", "payment_updated", "shipping_updated"]),
       at: z.iso.datetime(),
     })).optional(),
   });
@@ -348,8 +356,16 @@ function parseBackupData(zip: AdmZip): BackupData {
   const localFiles = entries.filter((entry) => !entry.isDirectory && isAllowedLocalPath(entry.entryName))
     .map((entry) => ({ name: entry.entryName, data: entry.getData() }));
 
+  const customers = z.array(customerSchema).max(50_000).safeParse(object.customers ?? []);
+  if (!customers.success || new Set(customers.data.map((customer) => customer.id)).size !== customers.data.length) {
+    throw new BackupError("Backup enthält ungültige oder doppelte Kunden.");
+  }
+  const customerIds = new Set(customers.data.map((customer) => customer.id));
+  if (orders.some((order) => order.customerId && !customerIds.has(order.customerId))) {
+    throw new BackupError("Backup enthält einen Auftrag mit unbekanntem Kunden.");
+  }
   return {
-    snapshot: { settings: settings.data, prints, orders, materialBookings, accessoryStockMovements },
+    snapshot: { settings: settings.data, prints, orders, materialBookings, accessoryStockMovements, customers: customers.data },
     authDatabase: authEntry.getData(),
     filamentConnections: restoredConnections,
     localFiles,

@@ -3,8 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import type {
-  AccessoryMaterial,
-  AccessoryStockMovement,
   AppSettings,
   Currency,
   Language,
@@ -29,7 +27,7 @@ import type { SoftwareInfo } from "@/lib/softwareUpdates";
 import { useAuth } from "@/lib/auth/context";
 import { hasPermission } from "@/lib/auth/permissions";
 
-export type SettingsTab = "general" | "software" | "support" | "database" | "filaments" | "users" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
+export type SettingsTab = "general" | "software" | "support" | "database" | "filaments" | "users" | "materials" | "printers" | "numbering" | "costs" | "queue";
 
 type ImportedPrinterProfile = Omit<PrinterProfile, "id">;
 
@@ -84,9 +82,8 @@ function parsePrinterProfileExport(value: unknown): ImportedPrinterProfile[] | n
   return printers;
 }
 
-export function SettingsForm({ initialSettings, initialAccessoryStockMovements, databaseSettings, filamentSettings, userSettings, initialTab = "general" }: {
+export function SettingsForm({ initialSettings, databaseSettings, filamentSettings, userSettings, initialTab = "general" }: {
   initialSettings: AppSettings;
-  initialAccessoryStockMovements: AccessoryStockMovement[];
   databaseSettings: ReactNode;
   filamentSettings: ReactNode;
   userSettings?: ReactNode;
@@ -98,9 +95,6 @@ export function SettingsForm({ initialSettings, initialAccessoryStockMovements, 
   const can = (permission: Parameters<typeof hasPermission>[1]) => hasPermission(user, permission, enabled);
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
   const [softwareInfo, setSoftwareInfo] = useState<SoftwareInfo | null>(null);
-  const [accessoryStockMovements, setAccessoryStockMovements] = useState(initialAccessoryStockMovements);
-  const [stockQuantityDrafts, setStockQuantityDrafts] = useState<Record<string, string>>({});
-  const [stockMessage, setStockMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
@@ -129,7 +123,6 @@ export function SettingsForm({ initialSettings, initialAccessoryStockMovements, 
     { id: "materials", label: t("settings.materials") },
     { id: "printers", label: t("settings.printers") },
     { id: "costs", label: t("settings.costsTitle") },
-    { id: "accessories", label: t("settings.accessoryMaterials") },
     { id: "numbering", label: t("settings.numbering") },
     { id: "queue", label: t("queue.title") },
     { id: "filaments", label: t("filamentDb.title") },
@@ -168,63 +161,6 @@ export function SettingsForm({ initialSettings, initialAccessoryStockMovements, 
   function removeMaterial(id: string) {
     setSettings((s) => ({ ...s, materials: s.materials.filter((m) => m.id !== id) }));
     setSaved(false);
-  }
-
-  function updateAccessoryMaterial(id: string, patch: Partial<AccessoryMaterial>) {
-    setSettings((s) => ({
-      ...s,
-      accessoryMaterials: s.accessoryMaterials.map((item) =>
-        item.id === id ? { ...item, ...patch } : item
-      ),
-    }));
-    setSaved(false);
-  }
-
-  function addAccessoryMaterial() {
-    setSettings((s) => ({
-      ...s,
-      accessoryMaterials: [
-        ...s.accessoryMaterials,
-        { id: randomUUID(), name: t("settings.newAccessory"), pricePerPack: 1, unitsPerPack: 1, stockQuantity: 0 },
-      ],
-    }));
-    setSaved(false);
-  }
-
-  function removeAccessoryMaterial(id: string) {
-    setSettings((s) => ({
-      ...s,
-      accessoryMaterials: s.accessoryMaterials.filter((item) => item.id !== id),
-    }));
-    setSaved(false);
-  }
-
-  async function changeAccessoryStock(item: AccessoryMaterial, action: "receipt" | "adjustment") {
-    const quantity = Number(stockQuantityDrafts[item.id]);
-    if (!Number.isSafeInteger(quantity) || quantity === 0 || (action === "receipt" && quantity < 1)) {
-      setStockMessage(t("settings.stockInvalid"));
-      return;
-    }
-    setStockMessage(null);
-    try {
-      const response = await fetch("/api/accessory-stock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, accessoryId: item.id, quantity }),
-      });
-      const body: { error?: string; accessories?: AccessoryMaterial[]; movements?: AccessoryStockMovement[] } =
-        await response.json();
-      if (!response.ok || !body.accessories || !body.movements) {
-        throw new Error(body.error ?? t("settings.stockSaveFailed"));
-      }
-      setSettings((current) => ({ ...current, accessoryMaterials: body.accessories! }));
-      setAccessoryStockMovements(body.movements);
-      setStockQuantityDrafts((current) => ({ ...current, [item.id]: "" }));
-      setStockMessage(t("settings.stockSaved"));
-    } catch (error) {
-      console.error("Could not update accessory stock:", error);
-      setStockMessage(error instanceof Error ? error.message : t("settings.stockSaveFailed"));
-    }
   }
 
   function updatePrinter(id: string, patch: Partial<PrinterProfile>) {
@@ -744,121 +680,6 @@ export function SettingsForm({ initialSettings, initialAccessoryStockMovements, 
           className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
         >
           {t("settings.addMaterial")}
-        </button>
-      </section>
-
-      <section
-        id="accessories-settings-panel"
-        role="tabpanel"
-        className={`${activeTab === "accessories" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
-      >
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-          {t("settings.accessoryMaterials")}
-        </h2>
-        <div className="mt-3 flex flex-col gap-3">
-          {settings.accessoryMaterials.map((item) => (
-            <div key={item.id} className="flex flex-wrap items-center gap-2">
-              <input
-                value={item.name}
-                onChange={(e) => updateAccessoryMaterial(item.id, { name: e.target.value })}
-                className={`w-40 ${textInputClass}`}
-                placeholder={t("settings.accessoryName")}
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                defaultValue={formatDecimal(item.pricePerPack, 2)}
-                onChange={(e) =>
-                  updateAccessoryMaterial(item.id, {
-                    pricePerPack: parseDecimal(e.target.value),
-                  })
-                }
-                aria-label={`${t("settings.pricePerPack")}: ${item.name}`}
-                className={`w-24 ${textInputClass}`}
-              />
-              <span className="text-xs text-slate-400 dark:text-slate-500">{unit}</span>
-              <span className="text-xs text-slate-400 dark:text-slate-500">{t("settings.pricePerPack")}</span>
-              <input
-                type="number"
-                min={1}
-                step="1"
-                value={item.unitsPerPack}
-                onChange={(e) =>
-                  updateAccessoryMaterial(item.id, { unitsPerPack: parseInt(e.target.value, 10) || 1 })
-                }
-                aria-label={`${t("settings.unitsPerPack")}: ${item.name}`}
-                className={`w-20 ${textInputClass}`}
-              />
-              <span className="text-xs text-slate-400 dark:text-slate-500">{t("settings.unitsPerPack")}</span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                {t("settings.costPerUnit")}: {unit}
-                {new Intl.NumberFormat(getIntlLocale(lang), {
-                  minimumFractionDigits: 3,
-                  maximumFractionDigits: 3,
-                }).format(item.pricePerPack / Math.max(1, item.unitsPerPack))}
-              </span>
-              <span className={`text-xs font-medium ${item.stockQuantity === 0 ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300"}`}>
-                {t("settings.stock")}: {item.stockQuantity} {t("extra.unit")}
-              </span>
-              <input
-                type="number"
-                step="1"
-                value={stockQuantityDrafts[item.id] ?? ""}
-                onChange={(event) => setStockQuantityDrafts((current) => ({
-                  ...current,
-                  [item.id]: event.target.value,
-                }))}
-                aria-label={`${t("settings.stockChange")}: ${item.name}`}
-                className={`w-20 ${textInputClass}`}
-              />
-              <button
-                type="button"
-                onClick={() => void changeAccessoryStock(item, "receipt")}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
-              >
-                {t("settings.stockReceive")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void changeAccessoryStock(item, "adjustment")}
-                className="rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
-              >
-                {t("settings.stockAdjust")}
-              </button>
-              <button
-                onClick={() => removeAccessoryMaterial(item.id)}
-                disabled={item.stockQuantity > 0}
-                title={item.stockQuantity > 0 ? t("settings.stockMustBeEmpty") : undefined}
-                className="ml-auto text-xs font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
-              >
-                {t("extra.remove")}
-              </button>
-            </div>
-          ))}
-        </div>
-        {stockMessage && <p role="status" className="mt-3 text-sm text-slate-600 dark:text-slate-300">{stockMessage}</p>}
-        {accessoryStockMovements.length > 0 && (
-          <div className="mt-5">
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t("settings.stockHistory")}</h3>
-          <div className="mt-2 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
-            {accessoryStockMovements.slice(0, 20).map((movement) => (
-              <div key={movement.id} className="flex flex-wrap justify-between gap-x-4 py-2 text-xs">
-                <span className="text-slate-700 dark:text-slate-200">
-                  {movement.accessoryName} · {movement.reference}
-                </span>
-                <span className={movement.quantity < 0 ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}>
-                  {movement.quantity > 0 ? "+" : ""}{movement.quantity} · {new Date(movement.createdAt).toLocaleString(getIntlLocale(lang))}
-                </span>
-              </div>
-            ))}
-          </div>
-          </div>
-        )}
-        <button
-          onClick={addAccessoryMaterial}
-          className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
-        >
-          {t("settings.addAccessoryMaterial")}
         </button>
       </section>
 

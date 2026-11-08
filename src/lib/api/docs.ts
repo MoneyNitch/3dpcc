@@ -158,7 +158,8 @@ document.getElementById("login").addEventListener("submit", async function (even
 </script>`;
   return new Response(`<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>3D-PCC API</title>
 ${authenticated ? '<link rel="stylesheet" href="/api/v1/docs/swagger-ui.css">' : ""}
-<style nonce="${nonce}">${styles}</style></head><body>${content}<p class="docs-error" id="error" role="alert"></p></body></html>`, {
+<style nonce="${nonce}">${styles}</style></head><body><p class="docs-notice" id="http-warning" role="note" hidden>${t("security.httpWarning")}</p>${content}<p class="docs-error" id="error" role="alert"></p>
+<script nonce="${nonce}">document.getElementById("http-warning").hidden = location.protocol !== "http:";</script></body></html>`, {
     status: authenticated ? 200 : 401,
     headers: {
       "Content-Type": "text/html; charset=utf-8",

@@ -1,4 +1,5 @@
-import { getSettings, listAccessoryStockMovements } from "@/lib/db";
+import { getSettings } from "@/lib/db";
+import { redirect } from "next/navigation";
 import { getDbConfigView } from "@/lib/dbConfig";
 import { translate } from "@/lib/i18n";
 import { SettingsForm, type SettingsTab } from "@/components/SettingsForm";
@@ -19,11 +20,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const can = (permission: Parameters<typeof hasPermission>[1]) => hasPermission(user, permission, enabled);
   const manageUsers = Boolean(enabled && user && can("users.manage"));
   const { tab } = await searchParams;
+  if (tab === "accessories") redirect("/accessories");
   const initialTab: SettingsTab = tab === "software" ? "software" : tab === "users" && manageUsers ? "users" : "general";
-  const [settings, accessoryStockMovements] = await Promise.all([
-    getSettings(),
-    listAccessoryStockMovements(),
-  ]);
+  const settings = await getSettings();
   const lang = settings.general.language;
   const t = (key: Parameters<typeof translate>[1]) =>
     translate(lang, key, undefined, settings.customLanguagePacks);
@@ -45,7 +44,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       )}
       <SettingsForm
         initialSettings={settings}
-        initialAccessoryStockMovements={accessoryStockMovements.slice(0, 200)}
         databaseSettings={can("database.manage") ? <>
           <DatabaseSettingsForm initialConfig={getDbConfigView()} />
           <BackupRestore />

@@ -9,9 +9,36 @@ import { ApiError, errorResponse, readBody } from "./http";
 import { createOperations, type ApiDependencies } from "./operations";
 import { createOpenApi } from "./openapi";
 import { dispatchApi } from "./router";
+import { runInNewContext } from "node:vm";
 
 const key = "a".repeat(43);
 const secondKey = "b".repeat(43);
+test("API documentation HTTPS notices use browser protocol, including behind a proxy", async () => {
+  const f = fixture();
+  for (const authorization of [null, `Bearer ${key}`]) {
+    const response = await f.send("/docs", "GET", undefined, authorization);
+    const text = await response.text();
+    assert.match(text, /id="http-warning" role="note" hidden/);
+    assert.match(text, /HTTPS is recommended/);
+    const script = text.match(/<script nonce="[^"]+">(document\.getElementById\("http-warning"\)[\s\S]*?)<\/script>/)?.[1];
+    assert.ok(script);
+    for (const protocol of ["http:", "https:"]) {
+      const notice = { hidden: true };
+      runInNewContext(script, { document: { getElementById: () => notice }, location: { protocol } });
+      assert.equal(notice.hidden, protocol === "https:");
+    }
+  }
+});
+test("reverse-proxy secure cookie configuration also covers legacy documentation sessions", () => {
+  const previous = process.env.AUTH_COOKIE_SECURE;
+  try {
+    process.env.AUTH_COOKIE_SECURE = "true";
+    assert.match(docsCookie(new Request("http://localhost/api/v1/docs"), "session"), /; Secure$/);
+  } finally {
+    if (previous === undefined) delete process.env.AUTH_COOKIE_SECURE;
+    else process.env.AUTH_COOKIE_SECURE = previous;
+  }
+});
 let previousKeys: string | undefined;
 let previousAuth: string | undefined;
 beforeEach(() => {

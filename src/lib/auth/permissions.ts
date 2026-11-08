@@ -50,6 +50,7 @@ export function apiPermission(path: string, method: string): Permission {
   const read = method === "GET" || method === "HEAD";
   if (path.endsWith("/calculate")) return "prints.read";
   if (path.startsWith("/prints")) return read ? "prints.read" : "prints.write";
+  if (path.startsWith("/products")) return read ? "prints.read" : "prints.write";
   if (path.startsWith("/invoices") || path.startsWith("/quotes")) return read ? "documents.read" : "documents.write";
   if (path.startsWith("/spools")) return "prints.read";
   return read ? "settings.read" : "settings.write";

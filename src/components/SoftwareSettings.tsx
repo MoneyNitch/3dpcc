@@ -5,6 +5,7 @@ import { usePermission } from "@/lib/auth/context";
 import { useLocale } from "@/lib/locale";
 import type { GithubPreferences, SoftwareInfo } from "@/lib/softwareUpdates";
 import { Changelog } from "@/components/Changelog";
+import { useSoftwareUpdate } from "@/lib/softwareUpdateContext";
 
 export function selectGithubPreferences(preferences: GithubPreferences): GithubPreferences {
   return {
@@ -20,6 +21,7 @@ export function SoftwareSettings({ initialPreferences, onPreferencesSaved, onInf
 }) {
   const { t, lang } = useLocale();
   const canEdit = usePermission("settings.write");
+  const { setUpdate } = useSoftwareUpdate();
   const [preferences, setPreferences] = useState(() => selectGithubPreferences(initialPreferences));
   const [info, setInfo] = useState<SoftwareInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,6 +44,7 @@ export function SoftwareSettings({ initialPreferences, onPreferencesSaved, onInf
       if (!controller.signal.aborted) {
         setInfo(body);
         onInfo(body);
+        setUpdate(body.update);
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -51,7 +54,7 @@ export function SoftwareSettings({ initialPreferences, onPreferencesSaved, onInf
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [onInfo]);
+  }, [onInfo, setUpdate]);
 
   useEffect(() => {
     let active = true;
@@ -76,6 +79,7 @@ export function SoftwareSettings({ initialPreferences, onPreferencesSaved, onInf
       if (!response.ok) throw new Error(`GitHub preference save failed (${response.status}).`);
       setPreferences(updated);
       onPreferencesSaved(updated);
+      setUpdate(updated.checkGithubUpdates ? null : { status: "disabled" });
       setInfo(null);
       onInfo(null);
       await load();

@@ -251,7 +251,7 @@ export function ProductsManager({ initialProductTypes, prints, orders, canAssign
           ? <p className={`${cardClass} text-sm text-slate-500 dark:text-slate-400`}>{t("products.noProductMatches")}</p>
         : detailView
           ? <div className="flex flex-col gap-4">
-          <Link href="/products" className="self-start text-sm text-orange-700 hover:underline dark:text-orange-400">
+          <Link href="/products" className="self-start rounded-md text-sm text-orange-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:text-orange-400">
             {t("products.backToList")}
           </Link>
           {productTypes.map((product) => {
@@ -266,133 +266,188 @@ export function ProductsManager({ initialProductTypes, prints, orders, canAssign
             const printImage = prints.find((print) => print.id === product.linkedPrintId)?.thumbnailBase64;
             const image = product.imageMode === "custom" ? product.imageBase64
               : product.imageMode === "print" ? printImage : null;
-            return <section key={product.id} className={`${cardClass} flex flex-col gap-4`}>
-              <div>
-                <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{product.name}</h1>
-                {product.fileName && <p className="mt-1 break-all text-sm text-slate-500 dark:text-slate-400">{product.fileName}</p>}
-              </div>
-              {image
-                ? <Image src={image} alt={product.name} width={800} height={600} unoptimized
-                  className="h-48 w-full rounded-lg bg-slate-50 object-contain dark:bg-slate-900" />
-                : <div className="flex h-32 items-center justify-center rounded-lg bg-slate-50 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                  {t("products.imageNone")}
-                </div>}
-              {product.linkedPrintId && <p className="text-sm text-slate-500 dark:text-slate-400">
-                {t("products.linkedPrint")}: {prints.find((print) => print.id === product.linkedPrintId)?.name ?? t("products.linkedPrintUnavailable")}
-              </p>}
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {t("products.serialCount")}: {product.serialNumbers.length}
-              </p>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div><dt className="text-slate-500 dark:text-slate-400">{t("products.prefix")}</dt><dd className="font-mono">{product.prefix}</dd></div>
-                <div><dt className="text-slate-500 dark:text-slate-400">{t("products.nextNumber")}</dt><dd className="font-mono">{product.nextNumber}</dd></div>
-              </dl>
-              {product.fileName && <a href={`/api/products/${product.id}/file`} className="self-start text-sm text-orange-700 hover:underline dark:text-orange-400">
-                {t("products.downloadFile")}
-              </a>}
-              {canEdit && <form onSubmit={(event) => void saveAppearance(event, product)}
-                encType="multipart/form-data" className="grid gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
-                <h3 className="text-sm font-medium">{t("products.linkAndImage")}</h3>
-                <label className="text-sm">{t("products.linkedPrint")}
-                  <select name="linkedPrintId" defaultValue={product.linkedPrintId ?? ""} className={inputClass}>
-                    <option value="">{t("products.noLinkedPrint")}</option>
-                    {prints.map((print) => <option key={print.id} value={print.id}>{print.name}</option>)}
-                  </select>
-                </label>
-                <label className="text-sm">{t("products.imageMode")}
-                  <select name="imageMode" defaultValue={product.imageMode} className={inputClass}>
-                    <option value="print">{t("products.imageFromPrint")}</option>
-                    <option value="custom">{t("products.imageCustom")}</option>
-                    <option value="none">{t("products.imageNone")}</option>
-                  </select>
-                </label>
-                <label className="text-sm">{t("products.customImage")}
-                  <input name="image" type="file" accept="image/png,image/jpeg,image/webp" className={inputClass} />
-                  <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{t("products.customImageHelp")}</span>
-                </label>
-                <button type="submit" disabled={appearanceBusy !== null}
-                  className="justify-self-start rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600 disabled:opacity-50">
-                  {appearanceBusy === product.id ? t("products.saving") : t("products.saveAppearance")}
-                </button>
-              </form>}
-              {canEdit && <div className="flex flex-wrap items-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-700">
-                <label className="text-sm">{t("products.quantity")}
-                  <input type="number" min={1} max={1000} step={1} value={quantities[product.id] ?? 1}
-                    onChange={(event) => setQuantities((current) => ({
-                      ...current, [product.id]: event.target.value === "" ? 0 : event.target.valueAsNumber,
-                    }))} className={`${inputClass} w-28`} />
-                </label>
-                <button type="button" disabled={busy !== null ||
-                  !Number.isInteger(quantities[product.id] ?? 1) ||
-                  (quantities[product.id] ?? 1) < 1 ||
-                  (quantities[product.id] ?? 1) > 1000}
-                  onClick={() => void generateSerials(product)}
-                  className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50">
-                  {busy === product.id ? t("products.generating") : t("products.generate")}
-                </button>
-              </div>}
-              {product.serialNumbers.length > 0 && <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-medium">{t("products.generatedSerials")}</h3>
-                  <button type="button" onClick={() => downloadCsv(product)}
-                    className="text-sm text-orange-700 hover:underline dark:text-orange-400">{t("products.downloadCsv")}</button>
+            const assignedSerialCount = product.serialNumbers.filter((serial) => serial.orderId !== null).length;
+            const linkedPrintName = prints.find((print) => print.id === product.linkedPrintId)?.name;
+            return <div key={product.id} className="flex flex-col gap-5">
+              <section className={`${cardClass} overflow-hidden !p-0`}>
+                <div className="grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <div className="flex min-h-56 items-center justify-center bg-slate-50 p-5 dark:bg-slate-900 sm:min-h-72">
+                    {image
+                      ? <Image src={image} alt={product.name} width={800} height={600} unoptimized
+                        className="max-h-80 w-full rounded-xl object-contain" />
+                      : <span className="text-sm text-slate-500 dark:text-slate-400">{t("products.imageNone")}</span>}
+                  </div>
+                  <div className="flex flex-col gap-5 p-5 sm:p-7">
+                    <div>
+                      <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{product.name}</h1>
+                      {product.fileName && <p className="mt-2 break-all text-sm text-slate-500 dark:text-slate-400">{product.fileName}</p>}
+                    </div>
+                    <dl className="grid grid-cols-2 gap-3">
+                      <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+                        <dt className="text-xs text-slate-500 dark:text-slate-400">{t("products.serialCount")}</dt>
+                        <dd className="mt-1 text-xl font-semibold">{product.serialNumbers.length}</dd>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+                        <dt className="text-xs text-slate-500 dark:text-slate-400">{t("products.assignedSerialCount")}</dt>
+                        <dd className="mt-1 text-xl font-semibold">{assignedSerialCount}</dd>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+                        <dt className="text-xs text-slate-500 dark:text-slate-400">{t("products.prefix")}</dt>
+                        <dd className="mt-1 break-all font-mono text-sm">{product.prefix}</dd>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+                        <dt className="text-xs text-slate-500 dark:text-slate-400">{t("products.nextNumber")}</dt>
+                        <dd className="mt-1 font-mono text-sm">{product.nextNumber}</dd>
+                      </div>
+                    </dl>
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 text-sm dark:border-slate-700">
+                      <p className="min-w-0 text-slate-500 dark:text-slate-400">
+                        <span className="font-medium text-slate-700 dark:text-slate-200">{t("products.linkedPrint")}: </span>
+                        {product.linkedPrintId
+                          ? linkedPrintName ?? t("products.linkedPrintUnavailable")
+                          : t("products.noLinkedPrint")}
+                      </p>
+                      {product.fileName && <a href={`/api/products/${product.id}/file`}
+                        className="shrink-0 font-medium text-orange-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:text-orange-400">
+                        {t("products.downloadFile")}
+                      </a>}
+                    </div>
+                  </div>
                 </div>
-                <input type="search" value={serialSearch[product.id] ?? ""}
-                  onChange={(event) => {
-                    setSerialSearch((current) => ({ ...current, [product.id]: event.target.value }));
-                    setSerialLimit((current) => ({ ...current, [product.id]: 100 }));
-                  }}
-                  placeholder={t("products.searchSerial")} className={inputClass} />
-                <div className="mt-3 overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="text-slate-500 dark:text-slate-400">
-                      <tr>
-                        <th className="p-2">{t("products.serialNumber")}</th>
-                        <th className="p-2">{t("products.customerOrder")}</th>
-                        <th className="p-2">{t("products.purchaseDate")}</th>
-                        <th className="p-2">{t("products.deliveryDate")}</th>
-                        {canEdit && <th className="p-2">{t("products.assignToOrder")}</th>}
-                      </tr>
-                    </thead>
-                    <tbody>{serials.map((serial) => {
-                      const order = serial.orderId ? orderById.get(serial.orderId) : undefined;
-                      return <tr key={serial.serialNumber} className="border-t border-slate-200 dark:border-slate-700">
-                        <td className="whitespace-nowrap p-2 font-mono">{serial.serialNumber}</td>
-                        <td className="p-2">{order
-                          ? <span>{order.customerName}<br /><span className="text-slate-500">ORD-{order.id.slice(0, 8).toUpperCase()}</span></span>
-                          : serial.orderId ? t("products.orderUnavailable") : t("products.unassigned")}</td>
-                        <td className="whitespace-nowrap p-2">{order ? new Date(order.createdAt).toLocaleDateString(getIntlLocale(lang)) : "—"}</td>
-                        <td className="whitespace-nowrap p-2">{order?.deliveredAt
-                          ? new Date(order.deliveredAt).toLocaleDateString(getIntlLocale(lang))
-                          : order ? t("products.notDelivered") : "—"}</td>
-                        {canEdit && <td className="min-w-52 p-2">
-                          <select value={serial.orderId ?? ""}
-                            disabled={!canAssignOrders || appearanceBusy !== null}
-                            onChange={(event) => void assignSerial(product, serial.serialNumber, event.target.value || null)}
-                            className={inputClass}>
-                            <option value="">{t("products.unassigned")}</option>
-                            {matchingOrders.map((candidate) => {
-                              const line = candidate.items.find((item) => item.printId === product.linkedPrintId);
-                              const assigned = product.serialNumbers.filter((entry) => entry.orderId === candidate.id).length;
-                              const full = assigned >= (line?.quantity ?? 0) && serial.orderId !== candidate.id;
-                              return <option key={candidate.id} value={candidate.id} disabled={full}>
-                                ORD-{candidate.id.slice(0, 8).toUpperCase()} · {candidate.customerName} ({assigned}/{line?.quantity ?? 0})
-                              </option>;
-                            })}
-                          </select>
-                        </td>}
-                      </tr>;
-                    })}</tbody>
-                  </table>
+              </section>
+
+              {canEdit && <section className={`${cardClass} flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between`}>
+                <div>
+                  <h2 className="font-semibold text-slate-900 dark:text-slate-100">{t("products.generate")}</h2>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    {t("products.nextNumber")}: <span className="font-mono">{product.prefix}{String(product.nextNumber).padStart(product.digits, "0")}</span>
+                  </p>
                 </div>
-                {matchingSerials.length > serials.length && <button type="button"
-                  onClick={() => setSerialLimit((current) => ({ ...current, [product.id]: (current[product.id] ?? 100) + 100 }))}
-                  className="mt-3 text-sm text-orange-700 hover:underline dark:text-orange-400">
-                  {t("products.showMore", { count: Math.min(100, matchingSerials.length - serials.length) })}
-                </button>}
-                {matchingSerials.length === 0 && <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">{t("products.noSerialMatches")}</p>}
-              </div>}
-            </section>;
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="text-sm">{t("products.quantity")}
+                    <input type="number" min={1} max={1000} step={1} value={quantities[product.id] ?? 1}
+                      onChange={(event) => setQuantities((current) => ({
+                        ...current, [product.id]: event.target.value === "" ? 0 : event.target.valueAsNumber,
+                      }))} className={`${inputClass} w-28`} />
+                  </label>
+                  <button type="button" disabled={busy !== null ||
+                    !Number.isInteger(quantities[product.id] ?? 1) ||
+                    (quantities[product.id] ?? 1) < 1 ||
+                    (quantities[product.id] ?? 1) > 1000}
+                    onClick={() => void generateSerials(product)}
+                    className="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:cursor-not-allowed disabled:opacity-50">
+                    {busy === product.id ? t("products.generating") : t("products.generate")}
+                  </button>
+                </div>
+              </section>}
+
+              {canEdit && <details className={`${cardClass} group !p-0`}>
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 font-medium marker:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 sm:p-5">
+                  <span>{t("products.linkAndImage")}</span>
+                  <span aria-hidden="true" className="text-slate-500 transition-transform group-open:rotate-180 dark:text-slate-400">⌄</span>
+                </summary>
+                <form onSubmit={(event) => void saveAppearance(event, product)} encType="multipart/form-data"
+                  className="grid gap-4 border-t border-slate-200 p-4 dark:border-slate-700 sm:grid-cols-2 sm:p-5">
+                  <label className="text-sm">{t("products.linkedPrint")}
+                    <select name="linkedPrintId" defaultValue={product.linkedPrintId ?? ""} className={inputClass}>
+                      <option value="">{t("products.noLinkedPrint")}</option>
+                      {prints.map((print) => <option key={print.id} value={print.id}>{print.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm">{t("products.imageMode")}
+                    <select name="imageMode" defaultValue={product.imageMode} className={inputClass}>
+                      <option value="print">{t("products.imageFromPrint")}</option>
+                      <option value="custom">{t("products.imageCustom")}</option>
+                      <option value="none">{t("products.imageNone")}</option>
+                    </select>
+                  </label>
+                  <label className="text-sm sm:col-span-2">{t("products.customImage")}
+                    <input name="image" type="file" accept="image/png,image/jpeg,image/webp" className={inputClass} />
+                    <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{t("products.customImageHelp")}</span>
+                  </label>
+                  <button type="submit" disabled={appearanceBusy !== null}
+                    className="justify-self-start rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:border-slate-600 dark:hover:bg-slate-700 disabled:opacity-50 sm:col-span-2">
+                    {appearanceBusy === product.id ? t("products.saving") : t("products.saveAppearance")}
+                  </button>
+                </form>
+              </details>}
+
+              <section className={`${cardClass} flex flex-col gap-4`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-slate-900 dark:text-slate-100">{t("products.generatedSerials")}</h2>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      {t("products.serialCount")}: {product.serialNumbers.length}
+                    </p>
+                  </div>
+                  {product.serialNumbers.length > 0 && <button type="button" onClick={() => downloadCsv(product)}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700">
+                    {t("products.downloadCsv")}
+                  </button>}
+                </div>
+                {product.serialNumbers.length > 0
+                  ? <>
+                    <label className="relative block max-w-md">
+                      <span className="sr-only">{t("products.searchSerial")}</span>
+                      <input type="search" value={serialSearch[product.id] ?? ""}
+                        onChange={(event) => {
+                          setSerialSearch((current) => ({ ...current, [product.id]: event.target.value }));
+                          setSerialLimit((current) => ({ ...current, [product.id]: 100 }));
+                        }}
+                        placeholder={t("products.searchSerial")} className={inputClass} />
+                    </label>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                      <table className="w-full text-left text-xs sm:text-sm">
+                        <thead className="bg-slate-50 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                          <tr>
+                            <th className="p-3">{t("products.serialNumber")}</th>
+                            <th className="p-3">{t("products.customerOrder")}</th>
+                            <th className="p-3">{t("products.purchaseDate")}</th>
+                            <th className="p-3">{t("products.deliveryDate")}</th>
+                            {canEdit && <th className="p-3">{t("products.assignToOrder")}</th>}
+                          </tr>
+                        </thead>
+                        <tbody>{serials.map((serial) => {
+                          const order = serial.orderId ? orderById.get(serial.orderId) : undefined;
+                          return <tr key={serial.serialNumber} className="border-t border-slate-200 dark:border-slate-700">
+                            <td className="whitespace-nowrap p-3 font-mono">{serial.serialNumber}</td>
+                            <td className="p-3">{order
+                              ? <span>{order.customerName}<br /><span className="text-slate-500">ORD-{order.id.slice(0, 8).toUpperCase()}</span></span>
+                              : serial.orderId ? t("products.orderUnavailable") : t("products.unassigned")}</td>
+                            <td className="whitespace-nowrap p-3">{order ? new Date(order.createdAt).toLocaleDateString(getIntlLocale(lang)) : "—"}</td>
+                            <td className="whitespace-nowrap p-3">{order?.deliveredAt
+                              ? new Date(order.deliveredAt).toLocaleDateString(getIntlLocale(lang))
+                              : order ? t("products.notDelivered") : "—"}</td>
+                            {canEdit && <td className="min-w-52 p-3">
+                              <select value={serial.orderId ?? ""}
+                                disabled={!canAssignOrders || appearanceBusy !== null}
+                                onChange={(event) => void assignSerial(product, serial.serialNumber, event.target.value || null)}
+                                className={inputClass}>
+                                <option value="">{t("products.unassigned")}</option>
+                                {matchingOrders.map((candidate) => {
+                                  const line = candidate.items.find((item) => item.printId === product.linkedPrintId);
+                                  const assigned = product.serialNumbers.filter((entry) => entry.orderId === candidate.id).length;
+                                  const full = assigned >= (line?.quantity ?? 0) && serial.orderId !== candidate.id;
+                                  return <option key={candidate.id} value={candidate.id} disabled={full}>
+                                    ORD-{candidate.id.slice(0, 8).toUpperCase()} · {candidate.customerName} ({assigned}/{line?.quantity ?? 0})
+                                  </option>;
+                                })}
+                              </select>
+                            </td>}
+                          </tr>;
+                        })}</tbody>
+                      </table>
+                    </div>
+                    {matchingSerials.length > serials.length && <button type="button"
+                      onClick={() => setSerialLimit((current) => ({ ...current, [product.id]: (current[product.id] ?? 100) + 100 }))}
+                      className="self-start text-sm text-orange-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 dark:text-orange-400">
+                      {t("products.showMore", { count: Math.min(100, matchingSerials.length - serials.length) })}
+                    </button>}
+                    {matchingSerials.length === 0 && <p className="text-sm text-slate-500 dark:text-slate-400">{t("products.noSerialMatches")}</p>}
+                  </>
+                  : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">{t("products.noSerials")}</p>}
+              </section>
+            </div>;
           })}
           </div>
           : <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-800">

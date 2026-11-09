@@ -14,6 +14,8 @@
   are disabled; links open only on explicit interaction.
 - Manual print creation has a refreshed responsive card layout with grouped print
   details, individual filament cards, a total-weight badge and a clearer image input.
+- Product details use a clearer responsive overview, a direct serial-number
+  generation action, collapsible appearance settings and a searchable serial list.
 
 ### Added
 - Order details can generate invoices from saved order pricing and contact snapshots,

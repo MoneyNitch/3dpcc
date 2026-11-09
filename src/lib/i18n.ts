@@ -72,6 +72,7 @@ const strings: Record<string, Record<Language, string>> = {
   "products.generate": { de: "Seriennummern erzeugen", en: "Generate serial numbers" },
   "products.generating": { de: "Wird erzeugt …", en: "Generating …" },
   "products.generatedSerials": { de: "Erzeugte Seriennummern", en: "Generated serial numbers" },
+  "products.noSerials": { de: "Noch keine Seriennummern erzeugt.", en: "No serial numbers have been generated yet." },
   "products.downloadCsv": { de: "Als CSV herunterladen", en: "Download as CSV" },
   "products.downloadFile": { de: "3MF-Datei herunterladen", en: "Download 3MF file" },
   "products.saving": { de: "Wird gespeichert …", en: "Saving …" },

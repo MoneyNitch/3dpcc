@@ -38,11 +38,17 @@ const productTypeSchema = z.strictObject({
   prefix: z.string().regex(/^[A-Za-z0-9._-]{1,30}$/),
   digits: z.number().int().min(1).max(12),
   nextNumber: z.number().int().min(1).max(1_000_000_001),
-  fileName: z.string().min(1).max(255),
+  fileName: z.string().max(255),
   linkedPrintId: z.uuid().nullable(),
   imageMode: z.enum(["print", "custom", "none"]),
   imageBase64: z.string().max(7_000_000)
     .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).nullable(),
+  serialNumbers: z.array(z.strictObject({
+    serialNumber: z.string().min(1).max(50),
+    orderId: z.uuid().nullable(),
+  })).max(10_000).refine((serials) =>
+    new Set(serials.map((serial) => serial.serialNumber)).size === serials.length,
+  "Product serial numbers must be unique."),
 }).refine((product) => product.imageMode !== "custom" || product.imageBase64 !== null,
   "Custom product images must be provided.");
 const costLine = z.enum(["material", "extraMaterials", "energy", "machine", "labor", "packaging", "margin", "tax"]);

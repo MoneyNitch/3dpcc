@@ -83,6 +83,11 @@ tower and total) and multi-color information, and calculates print costs.
   Link a product type to a saved print and use that print's thumbnail, upload a
   separate product photo, or leave the product without a photo. Product files,
   photos and numbering settings are included in encrypted application backups.
+  Generated serials are listed and can be assigned to an order containing the
+  linked print, up to the ordered quantity. The product and order views show the
+  customer, order date and actual delivery date (recorded when the order is marked
+  delivered). Orders cannot be deleted or have their matching quantities reduced
+  until their serial assignments are removed.
 - Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
 - **Accessory inventory** on its own **Accessory database** page (between Customers

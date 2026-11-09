@@ -37,6 +37,7 @@ test("encrypted full backups restore application records, auth and local files",
     const productType = {
       id: productId, name: "Backup lamp", prefix: "LAMP-", digits: 5, nextNumber: 7, fileName: "lamp.3mf",
       linkedPrintId: null, imageMode: "custom", imageBase64: "data:image/png;base64,aGVsbG8=",
+      serialNumbers: [{ serialNumber: "LAMP-00001", orderId: null }],
     };
     const productFile = Buffer.from("product-source-archive");
     await db.updateSettings((current) => ({ ...current, productTypes: [productType] }));

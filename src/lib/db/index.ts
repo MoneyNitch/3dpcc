@@ -1,6 +1,6 @@
 import type { AccessoryStockMovement, AppSettings, Customer, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { resolveDbConnection, type ResolvedDbConnection } from "../dbConfig";
-import { materialBookingActiveKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
+import { materialBookingActiveKey, recordOrderDeliveryDate, type ApplicationDataSnapshot, type DataStore } from "./shared";
 import { originalArchives } from "../originalArchives";
 import { softwareUpdates } from "../softwareUpdates";
 
@@ -126,6 +126,7 @@ export async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): 
     if (!existing || existing.updatedAt !== expectedUpdatedAt) return null;
     order = { ...order, updatedAt: new Date(Math.max(Date.parse(order.updatedAt), Date.parse(existing.updatedAt) + 1)).toISOString() };
   }
+  order = recordOrderDeliveryDate(order, existing);
   let saved: PrintOrder;
   if (!existing) {
     const history = order.history ?? [
@@ -143,7 +144,7 @@ export async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): 
         ...((["paymentStatus", "paymentMethod", "paidAmount", "paymentCurrency"] as const).some((field) => existing[field] !== order[field])
           ? [{ type: "payment_updated" as const, at: order.updatedAt }] : []),
         ...((["shippingStatus", "shippingMethod", "trackingNumber"] as const).some((field) => existing[field] !== order[field])
-          ? [{ type: "shipping_updated" as const, at: order.updatedAt }] : []),
+          ? [{ type: "shipping_updated" as const, at: order.updatedAt, ...(existing.shippingStatus !== order.shippingStatus ? { shippingStatus: order.shippingStatus } : {}) }] : []),
         ...(existing.status !== "completed" && order.status === "completed"
           ? [{ type: "completed" as const, at: order.updatedAt }]
           : []),

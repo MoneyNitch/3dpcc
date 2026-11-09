@@ -107,6 +107,7 @@ export type OrderHistoryEventType = "created" | "updated" | "completed" | "payme
 export interface OrderHistoryEntry {
   type: OrderHistoryEventType;
   at: string;
+  shippingStatus?: ShippingStatus;
 }
 
 export interface PrintOrder {
@@ -119,6 +120,7 @@ export interface PrintOrder {
   paidAmount?: number;
   paymentCurrency?: Currency;
   shippingStatus?: ShippingStatus;
+  deliveredAt?: string | null;
   shippingMethod?: string;
   trackingNumber?: string;
   status: OrderStatus;
@@ -285,6 +287,12 @@ export interface ProductType {
   linkedPrintId: string | null;
   imageMode: "print" | "custom" | "none";
   imageBase64: string | null;
+  serialNumbers: ProductSerial[];
+}
+
+export interface ProductSerial {
+  serialNumber: string;
+  orderId: string | null;
 }
 
 export type Language = string;

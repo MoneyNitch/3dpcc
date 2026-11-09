@@ -1,14 +1,21 @@
 import { ProductsManager } from "@/components/ProductsManager";
 import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
-import { getSettings, listPrints } from "@/lib/db";
+import { getSettings, listOrders, listPrints } from "@/lib/db";
 import { translate } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
   const user = await requirePage("prints.read");
-  const [settings, prints] = await Promise.all([getSettings(), listPrints()]);
+  const canReadOrders = hasPermission(user, "documents.read", authEnabled());
+  const [settings, prints, orders] = await Promise.all([
+    getSettings(),
+    listPrints(),
+    canReadOrders ? listOrders() : Promise.resolve([]),
+  ]);
+  const linkedPrintIds = new Set(settings.productTypes.flatMap((product) =>
+    product.linkedPrintId ? [product.linkedPrintId] : []));
   const lang = settings.general.language;
   const t = (key: string) => translate(lang, key, undefined, settings.customLanguagePacks);
   return (
@@ -25,6 +32,15 @@ export default async function ProductsPage() {
           thumbnailBase64: (print.plates ?? [print.plate])
             .find((plate) => plate.thumbnailBase64)?.thumbnailBase64 ?? null,
         }))}
+        orders={orders.filter((order) => order.items.some((item) => linkedPrintIds.has(item.printId))).map((order) => ({
+          id: order.id,
+          customerName: order.customerName,
+          createdAt: order.createdAt,
+          deliveredAt: order.deliveredAt ?? null,
+          items: order.items,
+        }))}
+        canAssignOrders={canReadOrders && hasPermission(user, "prints.write", authEnabled()) &&
+          hasPermission(user, "documents.write", authEnabled())}
         canEdit={hasPermission(user, "prints.write", authEnabled())}
       />
     </div>

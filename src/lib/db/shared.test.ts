@@ -1,14 +1,52 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assignAccessoryNumbers, defaultSettings, migrateSettings, preserveAccessoryStock } from "./shared";
+import { assignAccessoryNumbers, defaultSettings, migrateSettings, preserveAccessoryStock, recordOrderDeliveryDate } from "./shared";
 
 test("enables 3D previews by default", () => {
   assert.equal(defaultSettings.general.enable3dPreview, true);
 });
 
+test("records actual delivery once when an order is marked delivered", () => {
+  const order = {
+    id: "12345678-1234-4234-8234-123456789abc",
+    customerName: "Customer",
+    status: "ready" as const,
+    shippingStatus: "delivered" as const,
+    dueDate: null,
+    notes: "",
+    items: [],
+    createdAt: "2026-01-01T10:00:00.000Z",
+    updatedAt: "2026-01-05T12:00:00.000Z",
+  };
+  const delivered = recordOrderDeliveryDate(order);
+  assert.equal(delivered.deliveredAt, order.createdAt);
+  assert.equal(recordOrderDeliveryDate({ ...order, updatedAt: "2026-01-06T12:00:00.000Z" }, delivered).deliveredAt,
+    order.createdAt);
+  const transition = recordOrderDeliveryDate(order, { ...order, shippingStatus: "shipped", deliveredAt: null });
+  assert.equal(transition.deliveredAt, order.updatedAt);
+  assert.equal(recordOrderDeliveryDate({ ...order, shippingStatus: "shipped" }, transition).deliveredAt,
+    order.updatedAt);
+  assert.equal(recordOrderDeliveryDate({ ...order, shippingStatus: "shipped" }).deliveredAt, null);
+});
+
 test("migrates and preserves the product catalog through ordinary settings saves", () => {
   const legacy = migrateSettings({ ...defaultSettings, productTypes: undefined });
   assert.deepEqual(legacy.productTypes, []);
+  const migratedProduct = migrateSettings({
+    ...defaultSettings,
+    productTypes: [{
+      id: "12345678-1234-4234-8234-123456789abc",
+      name: "Legacy lamp",
+      prefix: "LAMP-",
+      digits: 5,
+      nextNumber: 8,
+      fileName: "lamp.3mf",
+    }],
+  }).productTypes[0];
+  assert.deepEqual(migratedProduct.serialNumbers, []);
+  assert.equal(migratedProduct.linkedPrintId, null);
+  assert.equal(migratedProduct.imageMode, "print");
+  assert.equal(migratedProduct.imageBase64, null);
   const product = {
     id: "12345678-1234-4234-8234-123456789abc",
     name: "Lamp",
@@ -19,6 +57,7 @@ test("migrates and preserves the product catalog through ordinary settings saves
     linkedPrintId: null,
     imageMode: "print" as const,
     imageBase64: null,
+    serialNumbers: [],
   };
   const current = { ...defaultSettings, productTypes: [product] };
   assert.deepEqual(preserveAccessoryStock(defaultSettings, current).productTypes, [{

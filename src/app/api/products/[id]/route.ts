@@ -47,6 +47,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   let notFound = false;
+  let printChangeConflict = false;
   let imageRequired = false;
   let updatedProduct: ProductType | null = null;
   await updateSettings((settings) => {
@@ -56,6 +57,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return settings;
     }
     const current = settings.productTypes[index];
+    if (current.serialNumbers.some((serial) => serial.orderId) && current.linkedPrintId !== linkedPrintId) {
+      printChangeConflict = true;
+      return settings;
+    }
     const nextImage = imageMode === "custom"
       ? hasNewImage ? imageBase64 : current.imageMode === "custom" ? current.imageBase64 : null
       : null;
@@ -69,6 +74,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return { ...settings, productTypes };
   });
   if (notFound) return NextResponse.json({ error: "products.error.notFound" }, { status: 404 });
+  if (printChangeConflict) return NextResponse.json({ error: "products.error.printChangeConflict" }, { status: 409 });
   if (imageRequired) return NextResponse.json({ error: "products.error.imageRequired" }, { status: 400 });
   return NextResponse.json({ productType: updatedProduct });
 }

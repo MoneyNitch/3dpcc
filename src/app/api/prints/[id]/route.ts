@@ -7,6 +7,7 @@ import {
   savePrint,
   updatePrintName,
   listOrders,
+  getSettings,
 } from "@/lib/db";
 import { isPrintLinkedToOrderError } from "@/lib/db/shared";
 import { readPrintImage } from "@/lib/printImage";
@@ -40,6 +41,9 @@ export async function DELETE(
   const { id } = await params;
   if ((await listOrders()).some((order) => order.items.some((item) => item.printId === id))) {
     return NextResponse.json({ error: "Drucke, die einem Auftrag zugeordnet sind, können nicht gelöscht werden." }, { status: 409 });
+  }
+  if ((await getSettings()).productTypes.some((product) => product.linkedPrintId === id)) {
+    return NextResponse.json({ error: "products.error.printDeleteConflict" }, { status: 409 });
   }
   await (await getPreviewQueue()).cancel(id);
   try {

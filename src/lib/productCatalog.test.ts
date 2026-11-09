@@ -14,6 +14,7 @@ const product = {
   linkedPrintId: null,
   imageMode: "none" as const,
   imageBase64: null,
+  serialNumbers: [],
 };
 
 test("generates zero-padded consecutive serials and advances the next number", () => {
@@ -30,6 +31,13 @@ test("rejects invalid quantities and exhausted number ranges", () => {
   }
   assert.throws(() => createProductSerialBatch({ ...product, nextNumber: 1_000_000_001 }, 1),
     (error: unknown) => error instanceof ProductCatalogError && error.status === 409);
+  assert.throws(() => createProductSerialBatch({
+    ...product,
+    serialNumbers: Array.from({ length: 10_000 }, (_, index) => ({
+      serialNumber: `LAMP-${index}`,
+      orderId: null,
+    })),
+  }, 1), (error: unknown) => error instanceof ProductCatalogError && error.status === 409);
 });
 
 test("settings validate product types and reject duplicate prefixes", () => {
@@ -41,6 +49,9 @@ test("settings validate product types and reject duplicate prefixes", () => {
 
 test("settings validate optional product image and linked-print fields", () => {
   assert.equal(settingsSchema.safeParse({ ...defaultSettings, productTypes: [
+    { ...product, fileName: "" },
+  ] }).success, true);
+  assert.equal(settingsSchema.safeParse({ ...defaultSettings, productTypes: [
     { ...product, imageMode: "custom", imageBase64: "data:image/png;base64,aGVsbG8=" },
   ] }).success, true);
   assert.equal(settingsSchema.safeParse({ ...defaultSettings, productTypes: [
@@ -48,5 +59,11 @@ test("settings validate optional product image and linked-print fields", () => {
   ] }).success, false);
   assert.equal(settingsSchema.safeParse({ ...defaultSettings, productTypes: [
     { ...product, linkedPrintId: "not-an-id" },
+  ] }).success, false);
+  assert.equal(settingsSchema.safeParse({ ...defaultSettings, productTypes: [
+    { ...product, serialNumbers: [
+      { serialNumber: "LAMP-0001", orderId: null },
+      { serialNumber: "LAMP-0001", orderId: null },
+    ] },
   ] }).success, false);
 });

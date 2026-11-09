@@ -13,6 +13,9 @@ export function createProductSerialBatch(product: ProductType, quantity: number)
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000) {
     throw new ProductCatalogError("products.error.quantity", 400);
   }
+  if (product.serialNumbers.length + quantity > 10_000) {
+    throw new ProductCatalogError("products.error.serialLimit", 409);
+  }
   const end = product.nextNumber + quantity;
   if (!Number.isSafeInteger(end) || end > 1_000_000_001) {
     throw new ProductCatalogError("products.error.numberLimit", 409);

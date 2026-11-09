@@ -268,11 +268,13 @@ function parseBackupData(zip: AdmZip): BackupData {
       fileName: z.string().min(1).max(255),
       size: z.number().int().positive().max(50 * 1024 * 1024),
     }).optional(),
+    deliveredAt: z.iso.datetime().nullable().optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
     history: z.array(z.strictObject({
       type: z.enum(["created", "updated", "completed", "payment_updated", "shipping_updated"]),
       at: z.iso.datetime(),
+      shippingStatus: z.enum(["not_shipped", "shipped", "delivered", "pickup"]).optional(),
     })).optional(),
   });
   const orders = object.orders.map((value) => {

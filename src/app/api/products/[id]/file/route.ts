@@ -9,6 +9,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const product = (await getSettings()).productTypes.find((item) => item.id === id);
   if (!product) return NextResponse.json({ error: "products.error.notFound" }, { status: 404 });
+  if (!product.fileName) return NextResponse.json({ error: "products.error.fileMissing" }, { status: 404 });
   const file = await productFiles.read(id);
   if (!file) return NextResponse.json({ error: "products.error.fileMissing" }, { status: 404 });
   const fileName = product.fileName.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "") || "product.3mf";

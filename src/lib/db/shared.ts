@@ -110,6 +110,15 @@ export function printModelKey(id: string, plateIndex?: number): string {
   return plateIndex === undefined ? id : `${id}:${plateIndex}`;
 }
 
+export function recordOrderDeliveryDate(order: PrintOrder, existing?: PrintOrder): PrintOrder {
+  const deliveredAt = existing
+    ? existing.deliveredAt ?? (existing.shippingStatus !== "delivered" && order.shippingStatus === "delivered"
+      ? order.updatedAt
+      : null)
+    : order.shippingStatus === "delivered" ? order.createdAt : null;
+  return { ...order, deliveredAt };
+}
+
 export const defaultSettings: AppSettings = {
   nextAccessoryNumber: 1,
   labelTemplates: [],
@@ -209,6 +218,7 @@ export function migrateSettings(raw: unknown): AppSettings {
         linkedPrintId: product.linkedPrintId ?? null,
         imageMode: product.imageMode ?? "print",
         imageBase64: product.imageBase64 ?? null,
+        serialNumbers: product.serialNumbers ?? [],
       })),
     };
   }

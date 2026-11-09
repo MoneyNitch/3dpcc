@@ -27,12 +27,13 @@ export async function POST(request: Request) {
   const prefix = String(form.get("prefix") ?? "").trim();
   const digits = Number(form.get("digits"));
   const file = form.get("file");
+  const hasFile = file instanceof File && file.name !== "";
   const linkedPrintId = String(form.get("linkedPrintId") ?? "").trim() || null;
   const imageMode = String(form.get("imageMode") ?? "none");
   if (!name || name.length > 100 || !prefixPattern.test(prefix) ||
     !Number.isInteger(digits) || digits < 1 || digits > 12 ||
-    !(file instanceof File) || !file.name.toLowerCase().endsWith(".3mf") ||
-    file.size < 1 || file.size > maximumProductFileBytes ||
+    (hasFile && (!file.name.toLowerCase().endsWith(".3mf") ||
+      file.size < 1 || file.size > maximumProductFileBytes)) ||
     (linkedPrintId !== null && !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(linkedPrintId)) ||
     !isImageMode(imageMode)) {
     return NextResponse.json({ error: "products.error.invalid" }, { status: 400 });
@@ -62,12 +63,15 @@ export async function POST(request: Request) {
     prefix,
     digits,
     nextNumber: 1,
-    fileName: file.name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 255),
+    fileName: hasFile
+      ? file.name.split(/[\\/]/).pop()!.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 255)
+      : "",
     linkedPrintId,
     imageMode,
     imageBase64,
+    serialNumbers: [],
   };
-  await productFiles.save(id, Buffer.from(await file.arrayBuffer()));
+  if (hasFile) await productFiles.save(id, Buffer.from(await file.arrayBuffer()));
   try {
     await updateSettings((settings) => {
       if (settings.productTypes.length >= 1000) {

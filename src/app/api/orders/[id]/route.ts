@@ -92,6 +92,15 @@ export async function PUT(
     queuePosition: parsed.data.printerId === (order.printerId ?? null) ? order.queuePosition : undefined,
     updatedAt: new Date().toISOString(),
   };
+  const assignedProductSerials = settings.productTypes.filter((product) =>
+    product.serialNumbers.some((serial) => serial.orderId === id));
+  for (const product of assignedProductSerials) {
+    const assignedCount = product.serialNumbers.filter((serial) => serial.orderId === id).length;
+    const item = parsed.data.items.find((candidate) => candidate.printId === product.linkedPrintId);
+    if (!item || item.quantity < assignedCount) {
+      return NextResponse.json({ error: "products.error.orderSerialConflict" }, { status: 409 });
+    }
+  }
   const saved = await saveOrder(updated);
   return NextResponse.json({ order: saved }, { headers: { "Cache-Control": "private, no-store" } });
 }
@@ -104,8 +113,12 @@ export async function DELETE(
   if (denied) return denied;
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
-  const exists = (await listOrders()).some((order) => order.id === id);
-  if (!exists) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
+  const [orders, settings] = await Promise.all([listOrders(), getSettings()]);
+  if (!orders.some((order) => order.id === id)) return NextResponse.json({ error: "Auftrag nicht gefunden." }, { status: 404 });
+  if (settings.productTypes.some((product) =>
+    product.serialNumbers.some((serial) => serial.orderId === id))) {
+    return NextResponse.json({ error: "products.error.orderDeleteConflict" }, { status: 409 });
+  }
   await orderGcodeFiles.remove(id);
   await deleteOrder(id);
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });

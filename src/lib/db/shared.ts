@@ -1,11 +1,15 @@
-import type { AppSettings, InvoiceElement, InvoiceElementType, InvoiceTemplate, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { createHash } from "node:crypto";
+import type { AccessoryStockMovement, AppSettings, Customer, InvoiceElement, InvoiceElementType, InvoiceTemplate, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { randomUUID } from "../clientId";
 import { isCurrencyCode } from "../currency";
 
 /** Storage backend contract implemented by each supported database driver. */
 export interface DataStore {
+  updateSettings(update: (current: AppSettings) => AppSettings): Promise<AppSettings>;
+  listCustomers(): Promise<Customer[]>;
+  saveCustomer(customer: Customer, expectedUpdatedAt?: string): Promise<boolean>;
   getSettings(): Promise<AppSettings>;
-  saveSettings(settings: AppSettings): Promise<void>;
+  saveSettings(settings: AppSettings, preserveManaged?: boolean): Promise<void>;
   insertPrint(print: ParsedPrint): Promise<void>;
   savePrint(print: ParsedPrint): Promise<void>;
   listPrints(): Promise<ParsedPrint[]>;
@@ -18,8 +22,15 @@ export interface DataStore {
   getPrintCostInputs(id: string): Promise<PrintCostInputs | null>;
   savePrintCostInputs(id: string, inputs: PrintCostInputs): Promise<void>;
   listOrders(): Promise<PrintOrder[]>;
-  saveOrder(order: PrintOrder): Promise<void>;
+  saveOrder(order: PrintOrder, expectedUpdatedAt?: string): Promise<boolean>;
+  saveOrderQueue(orders: PrintOrder[]): Promise<void>;
   deleteOrder(id: string): Promise<void>;
+  listMaterialBookings(printId?: string): Promise<MaterialBooking[]>;
+  createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean>;
+  saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void>;
+  listAccessoryStockMovements(): Promise<AccessoryStockMovement[]>;
+  applyAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found">;
+  importAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<void>;
   replaceApplicationData(data: ApplicationDataSnapshot): Promise<void>;
 }
 
@@ -35,6 +46,7 @@ export function isPrintLinkedToOrderError(error: unknown): error is PrintLinkedT
 }
 
 export interface ApplicationDataSnapshot {
+  customers?: Customer[];
   settings: AppSettings;
   prints: {
     print: ParsedPrint;
@@ -42,13 +54,82 @@ export interface ApplicationDataSnapshot {
     models: { plateIndex: number | null; model: Buffer }[];
   }[];
   orders: PrintOrder[];
+  materialBookings: MaterialBooking[];
+  accessoryStockMovements: AccessoryStockMovement[];
+}
+
+export function preserveAccessoryStock(settings: AppSettings, current: AppSettings): AppSettings {
+  const stockById = new Map(current.accessoryMaterials.map((item) => [item.id, item.stockQuantity]));
+  const numberById = new Map(current.accessoryMaterials.map((item) => [item.id, item.numericId]));
+  return assignAccessoryNumbers({
+    ...settings,
+    productTypes: current.productTypes,
+    nextAccessoryNumber: Math.max(settings.nextAccessoryNumber ?? 1, current.nextAccessoryNumber),
+    accessoryMaterials: settings.accessoryMaterials.map((item) => ({
+      ...item,
+      numericId: numberById.get(item.id) ?? item.numericId,
+      stockQuantity: stockById.get(item.id) ?? 0,
+    })),
+  });
+}
+
+export function assignAccessoryNumbers(settings: AppSettings): AppSettings {
+  const used = new Set<number>();
+  let next = Math.max(1, settings.nextAccessoryNumber ?? 1);
+  const items = settings.accessoryMaterials.map((item) => {
+    const number = item.numericId;
+    if (number === undefined) return item;
+    if (!Number.isSafeInteger(number) || number < 1 || number >= Number.MAX_SAFE_INTEGER || used.has(number)) {
+      throw new Error("Invalid or duplicate accessory number.");
+    }
+    used.add(number);
+    next = Math.max(next, number + 1);
+    return item;
+  }).map((item) => {
+    if (item.numericId !== undefined) return item;
+    if (next >= Number.MAX_SAFE_INTEGER) throw new Error("Accessory number range exhausted.");
+    return { ...item, numericId: next++ };
+  });
+  if (!Number.isSafeInteger(next)) throw new Error("Invalid accessory number counter.");
+  return { ...settings, accessoryMaterials: items, nextAccessoryNumber: next };
+}
+
+export function materialBookingActiveKey(booking: MaterialBooking): string | null {
+  if (booking.kind === "reversal") {
+    return booking.relatedBookingId
+      ? createHash("sha256").update(`reversal:${booking.relatedBookingId}`).digest("hex")
+      : null;
+  }
+  if (!["pending", "confirmed", "uncertain"].includes(booking.status)) return null;
+  return createHash("sha256")
+    .update(JSON.stringify([booking.printId, booking.provider, booking.sourceUrl, booking.spoolId]))
+    .digest("hex");
 }
 
 export function printModelKey(id: string, plateIndex?: number): string {
   return plateIndex === undefined ? id : `${id}:${plateIndex}`;
 }
 
+export function recordOrderDeliveryDate(order: PrintOrder, existing?: PrintOrder): PrintOrder {
+  const deliveredAt = existing
+    ? existing.deliveredAt ?? (existing.shippingStatus !== "delivered" && order.shippingStatus === "delivered"
+      ? order.updatedAt
+      : null)
+    : order.shippingStatus === "delivered" ? order.createdAt : null;
+  return { ...order, deliveredAt };
+}
+
 export const defaultSettings: AppSettings = {
+  nextAccessoryNumber: 1,
+  features: {
+    customers: true,
+    products: true,
+    orders: true,
+    invoices: true,
+    quotes: true,
+  },
+  labelTemplates: [],
+  productTypes: [],
   materials: [
     { id: "default-pla", name: "Standard PLA", type: "PLA", color: "#CCCCCC", pricePerKg: 20 },
     { id: "default-petg", name: "Standard PETG", type: "PETG", color: "#CCCCCC", pricePerKg: 24 },
@@ -113,6 +194,8 @@ export const defaultSettings: AppSettings = {
     enable3dPreview: true,
     retainOriginalArchives: false,
     previewComputePercent: 25,
+    fetchGithubChangelog: true,
+    checkGithubUpdates: true,
     companyName: "",
     companyAddress: "",
     companyEmail: "",
@@ -132,6 +215,30 @@ export const defaultSettings: AppSettings = {
 export function migrateSettings(raw: unknown): AppSettings {
   const data = raw as AppSettings & { printer?: AppSettings["printers"][number] };
   let result = data;
+  result = {
+    ...result,
+    features: {
+      customers: typeof result.features?.customers === "boolean" ? result.features.customers : defaultSettings.features.customers,
+      products: typeof result.features?.products === "boolean" ? result.features.products : defaultSettings.features.products,
+      orders: typeof result.features?.orders === "boolean" ? result.features.orders : defaultSettings.features.orders,
+      invoices: typeof result.features?.invoices === "boolean" ? result.features.invoices : defaultSettings.features.invoices,
+      quotes: typeof result.features?.quotes === "boolean" ? result.features.quotes : defaultSettings.features.quotes,
+    },
+  };
+  if (!result.labelTemplates) result = { ...result, labelTemplates: [] };
+  if (!result.productTypes) result = { ...result, productTypes: [] };
+  else {
+    result = {
+      ...result,
+      productTypes: result.productTypes.map((product) => ({
+        ...product,
+        linkedPrintId: product.linkedPrintId ?? null,
+        imageMode: product.imageMode ?? "print",
+        imageBase64: product.imageBase64 ?? null,
+        serialNumbers: product.serialNumbers ?? [],
+      })),
+    };
+  }
   if (!result.printers || result.printers.length === 0) {
     const legacyPrinter = data.printer ?? defaultSettings.printers[0];
     result = {
@@ -155,6 +262,11 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (result.general.previewComputePercent === undefined) {
     result = { ...result, general: { ...result.general, previewComputePercent: defaultSettings.general.previewComputePercent } };
   }
+  for (const field of ["fetchGithubChangelog", "checkGithubUpdates"] as const) {
+    if (result.general[field] === undefined) {
+      result = { ...result, general: { ...result.general, [field]: defaultSettings.general[field] } };
+    }
+  }
   for (const field of [
     "companyName",
     "companyAddress",
@@ -173,6 +285,14 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (!result.accessoryMaterials) {
     result = { ...result, accessoryMaterials: [] };
   }
+  result = {
+    ...result,
+    accessoryMaterials: result.accessoryMaterials.map((item) => ({
+      ...item,
+      stockQuantity: Number.isInteger(item.stockQuantity) && item.stockQuantity >= 0 ? item.stockQuantity : 0,
+    })),
+  };
+  result = assignAccessoryNumbers(result);
   if (!result.customLanguagePacks) {
     result = { ...result, customLanguagePacks: [] };
   }

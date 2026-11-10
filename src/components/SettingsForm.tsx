@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import type {
-  AccessoryMaterial,
   AppSettings,
   Currency,
   Language,
@@ -23,10 +22,12 @@ import { getCurrencyOptions } from "@/lib/currency";
 import packageJson from "../../package.json";
 import { PreviewQueueSettings } from "./PreviewQueueSettings";
 import { SupportExport } from "./SupportExport";
+import { SoftwareSettings } from "./SoftwareSettings";
+import type { SoftwareInfo } from "@/lib/softwareUpdates";
 import { useAuth } from "@/lib/auth/context";
 import { hasPermission } from "@/lib/auth/permissions";
 
-export type SettingsTab = "general" | "support" | "database" | "filaments" | "users" | "materials" | "accessories" | "printers" | "numbering" | "costs" | "queue";
+export type SettingsTab = "general" | "software" | "support" | "database" | "filaments" | "users" | "materials" | "printers" | "numbering" | "costs" | "queue";
 
 type ImportedPrinterProfile = Omit<PrinterProfile, "id">;
 
@@ -93,6 +94,7 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
   const { enabled, user } = useAuth();
   const can = (permission: Parameters<typeof hasPermission>[1]) => hasPermission(user, permission, enabled);
   const [settings, setSettings] = useState<AppSettings>(initialSettings);
+  const [softwareInfo, setSoftwareInfo] = useState<SoftwareInfo | null>(null);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [selectedPrinterId, setSelectedPrinterId] = useState(initialSettings.defaultPrinterId);
@@ -117,10 +119,10 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     parseLocalizedNumber(value, lang) || 0;
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "software", label: t("software.title") },
     { id: "materials", label: t("settings.materials") },
     { id: "printers", label: t("settings.printers") },
     { id: "costs", label: t("settings.costsTitle") },
-    { id: "accessories", label: t("settings.accessoryMaterials") },
     { id: "numbering", label: t("settings.numbering") },
     { id: "queue", label: t("queue.title") },
     { id: "filaments", label: t("filamentDb.title") },
@@ -158,35 +160,6 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
 
   function removeMaterial(id: string) {
     setSettings((s) => ({ ...s, materials: s.materials.filter((m) => m.id !== id) }));
-    setSaved(false);
-  }
-
-  function updateAccessoryMaterial(id: string, patch: Partial<AccessoryMaterial>) {
-    setSettings((s) => ({
-      ...s,
-      accessoryMaterials: s.accessoryMaterials.map((item) =>
-        item.id === id ? { ...item, ...patch } : item
-      ),
-    }));
-    setSaved(false);
-  }
-
-  function addAccessoryMaterial() {
-    setSettings((s) => ({
-      ...s,
-      accessoryMaterials: [
-        ...s.accessoryMaterials,
-        { id: randomUUID(), name: t("settings.newAccessory"), pricePerPack: 1, unitsPerPack: 1 },
-      ],
-    }));
-    setSaved(false);
-  }
-
-  function removeAccessoryMaterial(id: string) {
-    setSettings((s) => ({
-      ...s,
-      accessoryMaterials: s.accessoryMaterials.filter((item) => item.id !== id),
-    }));
     setSaved(false);
   }
 
@@ -300,6 +273,14 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     setSaved(false);
   }
 
+  function updateFeature(feature: keyof AppSettings["features"], enabled: boolean) {
+    setSettings((current) => ({
+      ...current,
+      features: { ...current.features, [feature]: enabled },
+    }));
+    setSaved(false);
+  }
+
   async function uploadLanguagePack(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -396,6 +377,13 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
   return (
     <div className="flex flex-col gap-6">
       {saveError && <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{t("settings.saveFailed")}</p>}
+      {softwareInfo?.update.status === "available" && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-300 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-950/30">
+          <p className="text-sm font-semibold text-orange-800 dark:text-orange-200">{t("software.update.available", { version: softwareInfo.update.version ?? "" })}</p>
+          <button type="button" onClick={() => setActiveTab("software")}
+            className="text-sm font-medium text-orange-700 underline dark:text-orange-300">{t("software.showDetails")}</button>
+        </div>
+      )}
       <div role="tablist" aria-label={t("settings.title")} className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700">
         {tabs.filter((tab) =>
           tab.id === "database" ? can("database.manage") :
@@ -459,6 +447,12 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
         {userSettings}
       </div>
 
+      <div id="software-settings-panel" role="tabpanel" aria-labelledby="software-settings-tab" hidden={activeTab !== "software"}>
+        <SoftwareSettings initialPreferences={initialSettings.general} onInfo={setSoftwareInfo}
+          onPreferencesSaved={(preferences) => {
+            setSettings((current) => ({ ...current, general: { ...current.general, ...preferences } }));
+          }} />
+      </div>
       <fieldset disabled={!can(activeTab === "numbering" ? "documents.write" : "settings.write")} className="contents">
       <section
         id="general-settings-panel"
@@ -496,6 +490,29 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
               ))}
             </select>
           </Field>
+        </div>
+        <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+          <h3 className="font-medium text-slate-800 dark:text-slate-100">{t("settings.featuresTitle")}</h3>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.featuresHelp")}</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {([
+              ["customers", "customers.title"],
+              ["products", "nav.products"],
+              ["orders", "nav.orders"],
+              ["invoices", "nav.invoices"],
+              ["quotes", "nav.quotes"],
+            ] as const).map(([feature, label]) => (
+              <label key={feature} className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={settings.features[feature]}
+                  onChange={(event) => updateFeature(feature, event.target.checked)}
+                  className="h-4 w-4 accent-orange-500"
+                />
+                <span>{t(label)}</span>
+              </label>
+            ))}
+          </div>
         </div>
         <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
           <h3 className="font-medium text-slate-800 dark:text-slate-100">{t("settings.invoiceSender")}</h3>
@@ -694,70 +711,6 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
           className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
         >
           {t("settings.addMaterial")}
-        </button>
-      </section>
-
-      <section
-        id="accessories-settings-panel"
-        role="tabpanel"
-        className={`${activeTab === "accessories" ? "" : "hidden "}rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800`}
-      >
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-          {t("settings.accessoryMaterials")}
-        </h2>
-        <div className="mt-3 flex flex-col gap-3">
-          {settings.accessoryMaterials.map((item) => (
-            <div key={item.id} className="flex flex-wrap items-center gap-2">
-              <input
-                value={item.name}
-                onChange={(e) => updateAccessoryMaterial(item.id, { name: e.target.value })}
-                className={`w-40 ${textInputClass}`}
-                placeholder={t("settings.accessoryName")}
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                defaultValue={formatDecimal(item.pricePerPack, 2)}
-                onChange={(e) =>
-                  updateAccessoryMaterial(item.id, {
-                    pricePerPack: parseDecimal(e.target.value),
-                  })
-                }
-                className={`w-24 ${textInputClass}`}
-              />
-              <span className="text-xs text-slate-400 dark:text-slate-500">{unit}</span>
-              <input
-                type="number"
-                min={1}
-                step="1"
-                value={item.unitsPerPack}
-                onChange={(e) =>
-                  updateAccessoryMaterial(item.id, { unitsPerPack: parseInt(e.target.value, 10) || 1 })
-                }
-                className={`w-20 ${textInputClass}`}
-              />
-              <span className="text-xs text-slate-400 dark:text-slate-500">{t("settings.unitsPerPack")}</span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                {t("settings.costPerUnit")}: {unit}
-                {new Intl.NumberFormat(getIntlLocale(lang), {
-                  minimumFractionDigits: 3,
-                  maximumFractionDigits: 3,
-                }).format(item.pricePerPack / Math.max(1, item.unitsPerPack))}
-              </span>
-              <button
-                onClick={() => removeAccessoryMaterial(item.id)}
-                className="ml-auto text-xs font-medium text-red-500 hover:underline dark:text-red-400"
-              >
-                {t("extra.remove")}
-              </button>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={addAccessoryMaterial}
-          className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
-        >
-          {t("settings.addAccessoryMaterial")}
         </button>
       </section>
 

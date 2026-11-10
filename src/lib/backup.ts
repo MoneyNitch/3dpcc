@@ -14,6 +14,7 @@ import { exportAuthDatabase, restoreAuthDatabase, verifyAuthDatabase } from "./a
 import { defaultCostInputs } from "./costCalculator";
 import { getApplicationDataSnapshot, replaceApplicationData } from "./db";
 import {
+  accessoryStockMovementSchema,
   costInputsSchema,
   printSchema,
   settingsSchema,
@@ -23,15 +24,17 @@ import { orderInputSchema } from "./orders";
 import { getPreviewQueue } from "./previewQueue";
 import { normalizeFilamentServiceUrl, type FilamentConnection } from "./externalFilaments";
 import type { ApplicationDataSnapshot } from "./db/shared";
-import type { PrintOrder } from "./types";
+import type { MaterialBooking, PrintOrder } from "./types";
 import { orderCalculationSnapshotSchema } from "./orderCalculation";
+import { materialBookingSchema } from "./externalFilaments";
+import { customerSchema } from "./customers";
 
 const magic = Buffer.from("3DPCCBACKUP1", "ascii");
 export const maximumBackupBytes = 512 * 1024 * 1024;
 const maximumEntries = 50_000;
 const maximumUncompressedBytes = 512 * 1024 * 1024;
 const dataDirectory = path.join(process.cwd(), "data");
-const directoryTargets = ["original-archives", "order-gcode", "preview-jobs"] as const;
+const directoryTargets = ["original-archives", "order-gcode", "preview-jobs", "product-files"] as const;
 
 export class BackupError extends Error {}
 
@@ -123,6 +126,9 @@ export async function createBackup(passphrase: string): Promise<Buffer> {
       })),
     })),
     orders: snapshot.orders,
+    customers: snapshot.customers ?? [],
+    materialBookings: snapshot.materialBookings,
+    accessoryStockMovements: snapshot.accessoryStockMovements,
     filamentConnections: getFilamentConnections(),
   }), "utf8"));
   zip.addFile("auth/auth.db", authDatabase);
@@ -156,6 +162,11 @@ function safeArchivePath(name: string): boolean {
 }
 
 function isAllowedLocalPath(name: string): boolean {
+  const productPrefix = "local/product-files/";
+  if (name.startsWith(productPrefix)) {
+    return /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.3mf$/i
+      .test(name.slice(productPrefix.length));
+  }
   const orderGcodePrefix = "local/order-gcode/";
   if (name.startsWith(orderGcodePrefix)) {
     return /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}\.gcode$/i
@@ -249,14 +260,22 @@ function parseBackupData(zip: AdmZip): BackupData {
   }
 
   const orderSchema = orderInputSchema.extend({
+    customerSnapshot: customerSchema.optional(),
     id: z.uuid(),
+    queuePosition: z.number().int().nonnegative().optional(),
     calculation: orderCalculationSnapshotSchema.optional(),
     gcodeAttachment: z.strictObject({
       fileName: z.string().min(1).max(255),
       size: z.number().int().positive().max(50 * 1024 * 1024),
     }).optional(),
+    deliveredAt: z.iso.datetime().nullable().optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
+    history: z.array(z.strictObject({
+      type: z.enum(["created", "updated", "completed", "payment_updated", "shipping_updated"]),
+      at: z.iso.datetime(),
+      shippingStatus: z.enum(["not_shipped", "shipped", "delivered", "pickup"]).optional(),
+    })).optional(),
   });
   const orders = object.orders.map((value) => {
     const order = orderSchema.safeParse(value);
@@ -265,6 +284,40 @@ function parseBackupData(zip: AdmZip): BackupData {
   });
   if (new Set(orders.map((order) => order.id)).size !== orders.length) {
     throw new BackupError("Backup enthält doppelte Aufträge.");
+  }
+  const rawBookings = object.materialBookings ?? [];
+  if (!Array.isArray(rawBookings)) throw new BackupError("Backup enthält ungültige Materialbuchungen.");
+  const materialBookings: MaterialBooking[] = rawBookings.map((value) => {
+    const booking = materialBookingSchema.safeParse(value);
+    if (!booking.success) throw new BackupError("Backup enthält eine ungültige Materialbuchung.");
+    return booking.data;
+  });
+  const rawAccessoryMovements = object.accessoryStockMovements ?? [];
+  if (!Array.isArray(rawAccessoryMovements)) throw new BackupError("Backup enthält ungültige Zubehörbuchungen.");
+  const accessoryStockMovements = rawAccessoryMovements.map((value) => {
+    const movement = accessoryStockMovementSchema.safeParse(value);
+    if (!movement.success) throw new BackupError("Backup enthält eine ungültige Zubehörbuchung.");
+    return movement.data;
+  });
+  if (new Set(accessoryStockMovements.map((movement) => movement.id)).size !== accessoryStockMovements.length ||
+    new Set(accessoryStockMovements.flatMap((movement) => movement.referenceKey ? [movement.referenceKey] : [])).size !==
+      accessoryStockMovements.filter((movement) => movement.referenceKey).length) {
+    throw new BackupError("Backup enthält doppelte Zubehörbuchungen.");
+  }
+  const bookingById = new Map(materialBookings.map((booking) => [booking.id, booking]));
+  const reversedBookingIds = new Set<string>();
+  const invalidReversal = materialBookings.some((booking) => {
+    if (booking.kind !== "reversal" || !booking.relatedBookingId) return false;
+    const original = bookingById.get(booking.relatedBookingId);
+    if (!original || original.kind !== "consumption" || original.status !== "confirmed" ||
+      original.printId !== booking.printId || original.provider !== booking.provider ||
+      original.sourceUrl !== booking.sourceUrl || original.spoolId !== booking.spoolId ||
+      reversedBookingIds.has(original.id)) return true;
+    reversedBookingIds.add(original.id);
+    return false;
+  });
+  if (new Set(materialBookings.map((booking) => booking.id)).size !== materialBookings.length || invalidReversal) {
+    throw new BackupError("Backup enthält ungültige Materialbuchungen.");
   }
   const printIds = new Set(prints.map((entry) => entry.print.id));
   if (new Set([...printIds]).size !== prints.length ||
@@ -305,8 +358,16 @@ function parseBackupData(zip: AdmZip): BackupData {
   const localFiles = entries.filter((entry) => !entry.isDirectory && isAllowedLocalPath(entry.entryName))
     .map((entry) => ({ name: entry.entryName, data: entry.getData() }));
 
+  const customers = z.array(customerSchema).max(50_000).safeParse(object.customers ?? []);
+  if (!customers.success || new Set(customers.data.map((customer) => customer.id)).size !== customers.data.length) {
+    throw new BackupError("Backup enthält ungültige oder doppelte Kunden.");
+  }
+  const customerIds = new Set(customers.data.map((customer) => customer.id));
+  if (orders.some((order) => order.customerId && !customerIds.has(order.customerId))) {
+    throw new BackupError("Backup enthält einen Auftrag mit unbekanntem Kunden.");
+  }
   return {
-    snapshot: { settings: settings.data, prints, orders },
+    snapshot: { settings: settings.data, prints, orders, materialBookings, accessoryStockMovements, customers: customers.data },
     authDatabase: authEntry.getData(),
     filamentConnections: restoredConnections,
     localFiles,

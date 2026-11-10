@@ -4,16 +4,39 @@ import Link from "next/link";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import { useLocale } from "@/lib/locale";
 import { getIntlLocale } from "@/lib/i18n";
-import type { OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
+import type { Customer, OrderPriority, OrderStatus, PrintOrder } from "@/lib/types";
+import { calculateOrderSnapshot, orderCalculationMatchesItems } from "@/lib/orderCalculation";
 import type { OrderInput } from "@/lib/orders";
+import { customerLabel } from "@/lib/customers";
+import { formatDuration, orderDurationSeconds, sortPrintQueue } from "@/lib/orderPlanning";
 import {
   defaultOrderFilters, dueFilters, filterOrders, isOrderOverdue, localDateKey, type OrderFilters,
 } from "@/lib/orderFilters";
 
-type PrintOption = { id: string; name: string };
+type PrintOption = { id: string; name: string; durationSeconds: number | null };
+type PrinterOption = { id: string; name: string };
 type Draft = OrderInput;
 const sortFields = ["priority", "dueDate", "customer", "status", "createdAt"] as const;
 const sortDirections = ["asc", "desc"] as const;
+const hiddenPrintersStorageKey = "3dpcc:orders:hidden-printers";
+const printerVisibilityEvent = "3dpcc:printer-visibility";
+
+function subscribeToPrinterVisibility(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(printerVisibilityEvent, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(printerVisibilityEvent, onChange);
+  };
+}
+
+function getPrinterVisibilitySnapshot() {
+  try {
+    return window.localStorage.getItem(hiddenPrintersStorageKey) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
 
 function subscribeToDateChange(onChange: () => void) {
   const timer = setInterval(onChange, 60_000);
@@ -22,8 +45,10 @@ function subscribeToDateChange(onChange: () => void) {
 
 const emptyDraft: Draft = {
   customerName: "",
+  customerId: null,
   status: "open",
   priority: "normal",
+  printerId: null,
   dueDate: null,
   notes: "",
   items: [],
@@ -32,8 +57,10 @@ const emptyDraft: Draft = {
 function draftFromOrder(order: PrintOrder): Draft {
   return {
     customerName: order.customerName,
+    customerId: order.customerId ?? null,
     status: order.status,
     priority: order.priority ?? "normal",
+    printerId: order.printerId ?? null,
     dueDate: order.dueDate,
     notes: order.notes,
     items: order.items.map((item) => ({ ...item })),
@@ -43,15 +70,21 @@ function draftFromOrder(order: PrintOrder): Draft {
 export function OrderManager({
   initialOrders,
   prints,
+  printers,
   canEdit,
+  canManageCustomers,
   initialEditingOrderId,
   initialToday,
+  customers,
 }: {
   initialOrders: PrintOrder[];
   prints: PrintOption[];
+  printers: PrinterOption[];
   canEdit: boolean;
+  canManageCustomers: boolean;
   initialEditingOrderId?: string;
   initialToday: string;
+  customers: Pick<Customer, "id" | "name" | "company" | "archived">[];
 }) {
   const { t, lang } = useLocale();
   const initialEditingOrder = canEdit ? initialOrders.find((order) => order.id === initialEditingOrderId) : undefined;
@@ -60,21 +93,58 @@ export function OrderManager({
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
   const [editingId, setEditingId] = useState<string | null>(initialEditingOrder?.id ?? null);
   const [formOpen, setFormOpen] = useState(Boolean(initialEditingOrder));
+  const [view, setView] = useState<"overview" | "planning">("overview");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const printNames = new Map(prints.map((print) => [print.id, print.name]));
+  const printerNames = new Map(printers.map((printer) => [printer.id, printer.name]));
   const inputClass =
     "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
   const sortSelectClass =
-    "mt-1 min-w-40 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
+    "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
   const statusOptions: OrderStatus[] = ["open", "in_progress", "ready", "completed", "cancelled"];
   const priorityOptions: OrderPriority[] = ["low", "normal", "high"];
   const [sortField, setSortField] = useState<(typeof sortFields)[number]>("priority");
   const [sortDirection, setSortDirection] = useState<(typeof sortDirections)[number]>("desc");
   const [filters, setFilters] = useState<OrderFilters>(defaultOrderFilters);
+  const hiddenPrintersSnapshot = useSyncExternalStore(
+    subscribeToPrinterVisibility,
+    getPrinterVisibilitySnapshot,
+    () => "[]",
+  );
+  const hiddenPrinterIds = (() => {
+    try {
+      const parsed: unknown = JSON.parse(hiddenPrintersSnapshot);
+      if (!Array.isArray(parsed) || !parsed.every((id): id is string => typeof id === "string")) return [];
+      const printerIds = new Set(printers.map((printer) => printer.id));
+      return parsed.filter((id) => printerIds.has(id));
+    } catch (error) {
+      console.error("Could not parse printer visibility preference:", error);
+      return [];
+    }
+  })();
+
+  function setPrinterVisibility(printerId: string, visible: boolean) {
+    const updated = visible
+      ? hiddenPrinterIds.filter((id) => id !== printerId)
+      : [...hiddenPrinterIds, printerId];
+    try {
+      window.localStorage.setItem(hiddenPrintersStorageKey, JSON.stringify(updated));
+      window.dispatchEvent(new Event(printerVisibilityEvent));
+      setMessage(null);
+    } catch (error) {
+      console.error("Could not save printer visibility preference:", error);
+      setMessage({ type: "error", text: t("orders.queue.visibilitySaveFailed") });
+    }
+  }
   const today = useSyncExternalStore(subscribeToDateChange,
     () => localDateKey(new Date()), () => initialToday);
   const priorityRank: Record<OrderPriority, number> = { low: 0, normal: 1, high: 2 };
+  const activeQueueOrders = orders.filter((order) =>
+    order.status !== "completed" && order.status !== "cancelled");
+  const queueForPrinter = (printerId: string) =>
+    sortPrintQueue(activeQueueOrders.filter((order) => order.printerId === printerId));
+  const unassignedQueue = sortPrintQueue(activeQueueOrders.filter((order) => !order.printerId));
   const sortedOrders = filterOrders(orders, filters, today).sort((left, right) => {
     let comparison = 0;
     switch (sortField) {
@@ -182,7 +252,7 @@ export function OrderManager({
     try {
       const response = await fetch(`/api/orders/${id}`, { method: "DELETE" });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? t("orders.deleteFailed"));
+      if (!response.ok) throw new Error(t(body.error ?? "orders.deleteFailed"));
       setOrders((current) => current.filter((order) => order.id !== id));
       setMessage({ type: "success", text: t("orders.deleted") });
     } catch (error) {
@@ -243,6 +313,33 @@ export function OrderManager({
     }
   }
 
+  async function moveQueueOrder(printerId: string, queue: PrintOrder[], index: number, direction: -1 | 1) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= queue.length) return;
+    const reordered = [...queue];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/orders/queue", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ printerId, orderIds: reordered.map((order) => order.id) }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? t("orders.queue.saveFailed"));
+      setOrders(body.orders as PrintOrder[]);
+      setMessage({ type: "success", text: t("orders.queue.saved") });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : t("orders.queue.saveFailed"),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function addItem() {
     const alreadySelected = new Set(draft.items.map((item) => item.printId));
     const next = prints.find((print) => !alreadySelected.has(print.id));
@@ -269,21 +366,51 @@ export function OrderManager({
         }`}>{message.text}</p>
       )}
 
-      {canEdit && !formOpen && (
-        <button type="button" onClick={startNewOrder}
+      {!formOpen && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "orders.overview.active", count: orders.filter((order) => !["completed", "cancelled"].includes(order.status)).length, status: "active" as const, due: "all" as const },
+          { label: "orders.status.in_progress", count: orders.filter((order) => order.status === "in_progress").length, status: "in_progress" as const, due: "all" as const },
+          { label: "orders.status.ready", count: orders.filter((order) => order.status === "ready").length, status: "ready" as const, due: "all" as const },
+          { label: "orders.overdue", count: orders.filter((order) => isOrderOverdue(order, today)).length, status: "not_completed" as const, due: "overdue" as const },
+        ].map((stat) => <button key={stat.label} type="button" onClick={() => { setView("overview"); setFilters({ ...defaultOrderFilters, status: stat.status, due: stat.due }); }}
+          className={`rounded-xl border bg-white p-4 text-left shadow-sm dark:bg-slate-800 ${stat.label === "orders.overdue" && stat.count ? "border-red-300 text-red-700 dark:border-red-800 dark:text-red-300" : "border-slate-200 dark:border-slate-700"}`}>
+          <span className="text-xs text-slate-500 dark:text-slate-400">{t(stat.label)}</span><span className="mt-1 block text-2xl font-semibold">{stat.count}</span>
+        </button>)}
+      </div>}
+      {!formOpen && <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800">
+          {(["overview", "planning"] as const).map((tab) => <button type="button" key={tab} aria-pressed={view === tab}
+            onClick={() => setView(tab)} className={`rounded-lg px-4 py-2 text-sm font-medium ${view === tab ? "bg-orange-50 text-orange-800 dark:bg-orange-950/30 dark:text-orange-300" : "text-slate-500 dark:text-slate-400"}`}>{t(tab === "overview" ? "orders.overview.title" : "orders.queue.title")}</button>)}
+        </div>
+        {canEdit && <button type="button" onClick={startNewOrder}
           className="self-start rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600">
           {t("orders.create")}
-        </button>
-      )}
+        </button>}
+      </div>}
 
       {formOpen && (
         <form onSubmit={(event) => void saveOrder(event)}
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <h2 className="text-lg font-semibold">{t(editingId ? "orders.edit" : "orders.create")}</h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("orders.overview.formHelp")}</p>
+          <div className="mt-4 grid gap-4 rounded-lg bg-slate-50 p-4 sm:grid-cols-2 dark:bg-slate-900/40">
+            <label className="text-sm font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
+              {t("customers.select")}
+              <select className={inputClass} value={draft.customerId ?? ""} onChange={(event) => {
+                const customer = customers.find((entry) => entry.id === event.target.value);
+                setDraft((current) => ({ ...current, customerId: customer?.id ?? null,
+                  customerName: customer ? customerLabel(customer) : current.customerName }));
+              }}>
+                <option value="">{t("customers.freeName")}</option>
+                {customers.filter((customer) => !customer.archived || customer.id === draft.customerId).map((customer) => (
+                  <option key={customer.id} value={customer.id}>{customer.name}{customer.company ? ` · ${customer.company}` : ""}{customer.archived ? ` (${t("customers.archived")})` : ""}</option>
+                ))}
+              </select>
+              {canManageCustomers && <Link href="/customers" className="mt-1 inline-block text-xs text-orange-700 hover:underline dark:text-orange-300">{t("customers.manage")}</Link>}
+            </label>
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
               {t("orders.customer")}
-              <input className={inputClass} value={draft.customerName} required maxLength={200}
+              <input className={inputClass} value={draft.customerName} required readOnly={Boolean(draft.customerId)} maxLength={403}
                 onChange={(event) => setDraft((current) => ({ ...current, customerName: event.target.value }))} />
             </label>
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
@@ -304,6 +431,14 @@ export function OrderManager({
                   if (priority) setDraft((current) => ({ ...current, priority }));
                 }}>
                 {priorityOptions.map((priority) => <option key={priority} value={priority}>{t(`orders.priority.${priority}`)}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+              {t("orders.queue.printer")}
+              <select className={inputClass} value={draft.printerId ?? ""}
+                onChange={(event) => setDraft((current) => ({ ...current, printerId: event.target.value || null }))}>
+                <option value="">{t("orders.queue.unassigned")}</option>
+                {printers.map((printer) => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
               </select>
             </label>
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
@@ -380,14 +515,95 @@ export function OrderManager({
         </form>
       )}
 
-      {orders.length === 0 ? (
+      {!formOpen && view === "planning" && (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <h2 className="text-lg font-semibold">{t("orders.queue.title")}</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("orders.queue.rule")}</p>
+          {printers.length > 0 && <fieldset className="mt-4">
+            <legend className="text-sm font-medium">{t("orders.queue.visiblePrinters")}</legend>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2">
+              {printers.map((printer) => (
+                <label key={printer.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={!hiddenPrinterIds.includes(printer.id)}
+                    onChange={(event) => setPrinterVisibility(printer.id, event.target.checked)} />
+                  {printer.name}
+                </label>
+              ))}
+            </div>
+          </fieldset>}
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {printers.map((printer) => {
+              if (hiddenPrinterIds.includes(printer.id)) return null;
+              const queue = queueForPrinter(printer.id);
+              const durations = queue.map((order) => orderDurationSeconds(order, prints));
+              const totalSeconds = durations.every((seconds): seconds is number => seconds !== null)
+                ? durations.reduce((total, seconds) => total + seconds, 0)
+                : null;
+              return (
+                <section key={printer.id} className="rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <h3 className="font-semibold">{printer.name}</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      {t("orders.queue.occupied", {
+                        duration: queue.length ? (totalSeconds === null ? t("orders.queue.unknown") : formatDuration(totalSeconds)) : formatDuration(0),
+                      })}
+                    </p>
+                  </div>
+                  {queue.length === 0 ? <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    {t("orders.queue.empty")}
+                  </p> : <ol className="mt-3 flex flex-col gap-2">
+                    {queue.map((order, index) => {
+                      const duration = orderDurationSeconds(order, prints);
+                      return (
+                        <li key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 p-3 text-sm dark:bg-slate-900">
+                          <div>
+                            <span className="mr-2 font-semibold">{index + 1}.</span>
+                            <Link href={`/orders/${order.id}`} className="font-medium hover:text-orange-600 hover:underline dark:hover:text-orange-400">{order.customerName}</Link>
+                            {index === 0 && <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-950 dark:text-orange-200">
+                              {t("orders.queue.next")}
+                            </span>}
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              {order.items.map((item) => `${item.quantity} × ${printNames.get(item.printId) ?? t("orders.missingPrint")}`).join(", ")}
+                              {" · "}{t("orders.queue.estimated", {
+                                duration: duration === null ? t("orders.queue.unknown") : formatDuration(duration),
+                              })}
+                            </p>
+                          </div>
+                          {canEdit && <div className="flex gap-1">
+                            <button type="button" aria-label={t("orders.queue.moveUp")} title={t("orders.queue.moveUp")}
+                              disabled={busy || index === 0} onClick={() => void moveQueueOrder(printer.id, queue, index, -1)}
+                              className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40 dark:border-slate-600">↑</button>
+                            <button type="button" aria-label={t("orders.queue.moveDown")} title={t("orders.queue.moveDown")}
+                              disabled={busy || index === queue.length - 1} onClick={() => void moveQueueOrder(printer.id, queue, index, 1)}
+                              className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40 dark:border-slate-600">↓</button>
+                          </div>}
+                        </li>
+                      );
+                    })}
+                  </ol>}
+                </section>
+              );
+            })}
+            {unassignedQueue.length > 0 && <section className="rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700">
+              <h3 className="font-semibold">{t("orders.queue.unassigned")}</h3>
+              <ul className="mt-2 flex flex-col gap-2 text-sm">
+                {unassignedQueue.map((order) => <li key={order.id}>
+                  <Link href={`/orders/${order.id}`} className="hover:text-orange-600 hover:underline dark:hover:text-orange-400">{order.customerName}</Link>
+                </li>)}
+              </ul>
+            </section>}
+          </div>
+        </section>
+      )}
+
+      {!formOpen && view === "overview" && (orders.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
           {t("orders.empty")}
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="min-w-40 flex-1 text-sm font-medium text-slate-600 dark:text-slate-300">
+          <div className="grid items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-700 dark:bg-slate-800">
+            <label className="min-w-0 text-sm font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
               {t("orders.customerSearch")}
               <input type="search" className={inputClass} value={filters.customer}
                 onChange={(event) => setFilters((current) => ({ ...current, customer: event.target.value }))} />
@@ -396,11 +612,12 @@ export function OrderManager({
               {t("orders.statusFilter")}
               <select className={sortSelectClass} value={filters.status}
                 onChange={(event) => {
-                  const status = (["not_completed", "all", ...statusOptions] as const)
+                  const status = (["not_completed", "active", "all", ...statusOptions] as const)
                     .find((option) => option === event.target.value);
                   if (status) setFilters((current) => ({ ...current, status }));
                 }}>
                 <option value="not_completed">{t("orders.notCompleted")}</option>
+                <option value="active">{t("orders.overview.active")}</option>
                 <option value="all">{t("orders.filterAll")}</option>
                 {statusOptions.map((status) => <option key={status} value={status}>{t(`orders.status.${status}`)}</option>)}
               </select>
@@ -473,6 +690,7 @@ export function OrderManager({
               }`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
+                    <p className="mb-1 font-mono text-xs text-slate-500 dark:text-slate-400">ORD-{order.id.slice(0, 8).toUpperCase()}</p>
                     <h2 className="text-lg font-semibold">
                       <Link href={`/orders/${order.id}`} className="hover:text-orange-600 hover:underline dark:hover:text-orange-400">{order.customerName}</Link>
                     </h2>
@@ -512,6 +730,9 @@ export function OrderManager({
                           {t("orders.dueDate")}: {new Intl.DateTimeFormat(getIntlLocale(lang)).format(new Date(`${order.dueDate}T00:00:00`))}
                         </span>
                       )}
+                      {order.printerId && <span>
+                        {t("orders.queue.printer")}: {printerNames.get(order.printerId) ?? t("orders.queue.unknownPrinter")}
+                      </span>}
                       {isOrderOverdue(order, today) && (
                         <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-800 dark:bg-red-900 dark:text-red-100">
                           {t("orders.overdue")}
@@ -528,6 +749,15 @@ export function OrderManager({
                     </div>
                   )}
                 </div>
+                <div className="mt-4 grid gap-3 rounded-lg bg-slate-50 p-3 text-sm sm:grid-cols-3 dark:bg-slate-900/40">
+                  <div><p className="text-xs text-slate-500">{t("orders.items")}</p><p className="mt-1 font-medium">{order.items.reduce((sum, item) => sum + item.quantity, 0)} {t("extra.unit")}</p></div>
+                  <div><p className="text-xs text-slate-500">{t("orders.workflow.payment")}</p><p className="mt-1 font-medium">{t(`orders.payment.${order.paymentStatus ?? "unpaid"}`)}</p></div>
+                  <div><p className="text-xs text-slate-500">{t("cost.totalPrice")}</p><p className="mt-1 font-semibold">{order.calculation
+                    ? new Intl.NumberFormat(getIntlLocale(lang), { style: "currency", currency: order.calculation.currency }).format(calculateOrderSnapshot(order.calculation).totals.totalPrice)
+                    : t("orders.overview.noPrice")}</p>
+                    {order.calculation && !orderCalculationMatchesItems(order, order.calculation) && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{t("orders.overview.outdatedPrice")}</p>}
+                  </div>
+                </div>
                 <ul className="mt-3 flex flex-col gap-1 text-sm">
                   {order.items.map((item) => (
                     <li key={item.printId} className="flex flex-wrap justify-between gap-2">
@@ -540,7 +770,7 @@ export function OrderManager({
                     </li>
                   ))}
                 </ul>
-                {order.notes && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">{order.notes}</p>}
+                {order.notes && <details className="mt-3 text-sm text-slate-600 dark:text-slate-300"><summary className="cursor-pointer">{t("orders.notes")}</summary><p className="mt-2 whitespace-pre-wrap">{order.notes}</p></details>}
                 {order.gcodeAttachment && (
                   <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
                     <a
@@ -568,7 +798,7 @@ export function OrderManager({
             ))}
           </div>
         </>
-      )}
+      ))}
     </div>
   );
 }

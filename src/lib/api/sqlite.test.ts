@@ -21,18 +21,21 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     import { originalArchives } from ${JSON.stringify(new URL("../originalArchives.ts", import.meta.url).href)};
     import { deletePrint } from ${JSON.stringify(new URL("../db/index.ts", import.meta.url).href)};
     import { POST as createOrder } from ${JSON.stringify(new URL("../../app/api/orders/route.ts", import.meta.url).href)};
+    import { PUT as reorderQueue } from ${JSON.stringify(new URL("../../app/api/orders/queue/route.ts", import.meta.url).href)};
     import { PATCH as updateOrderStatus, PUT as updateOrder, DELETE as deleteOrder } from ${JSON.stringify(new URL("../../app/api/orders/[id]/route.ts", import.meta.url).href)};
     import { POST as uploadOrderGcode, GET as downloadOrderGcode, DELETE as deleteOrderGcode } from ${JSON.stringify(new URL("../../app/api/orders/[id]/gcode/route.ts", import.meta.url).href)};
     import { GET as calculateOrder, PUT as saveCalculation } from ${JSON.stringify(new URL("../../app/api/orders/[id]/calculate/route.ts", import.meta.url).href)};
     import { createOrderCalculation, calculateOrderSnapshot } from ${JSON.stringify(new URL("../orderCalculation.ts", import.meta.url).href)};
     import { orderGcodeFiles } from ${JSON.stringify(new URL("../orderGcode.ts", import.meta.url).href)};
     import { POST as consumeSpool } from ${JSON.stringify(new URL("../../app/api/filament-spools/route.ts", import.meta.url).href)};
+    import { POST as reverseBooking } from ${JSON.stringify(new URL("../../app/api/filament-bookings/route.ts", import.meta.url).href)};
     import { saveFilamentConnection } from ${JSON.stringify(new URL("../filamentConfig.ts", import.meta.url).href)};
     import { DELETE as deletePrintRoute } from ${JSON.stringify(new URL("../../app/api/prints/[id]/route.ts", import.meta.url).href)};
     import AdmZip from ${JSON.stringify(pathToFileURL(requireModule.resolve("adm-zip")).href)};
     const store = createSqliteStore();
     saveFilamentConnection("spoolman", { url: "http://localhost:7912", apiKey: "" });
     const originalFetch = globalThis.fetch;
+    const consumedPrintId = crypto.randomUUID();
     let stockWrites = 0;
     globalThis.fetch = async (_url, options) => {
       if (options?.method === "PUT") {
@@ -46,7 +49,7 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
       }]);
     };
     try {
-      const consumption = { provider: "spoolman", sourceUrl: "http://localhost:7912", id: 1, grams: 25, confirmed: true };
+      const consumption = { printId: consumedPrintId, provider: "spoolman", sourceUrl: "http://localhost:7912", id: 1, grams: 25, confirmed: true };
       const consume = (body) => consumeSpool(new Request("http://localhost/api/filament-spools", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       }));
@@ -56,6 +59,22 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
       assert.equal(stockWrites, 0);
       assert.equal((await consume(consumption)).status, 200);
       assert.equal(stockWrites, 1);
+      assert.equal((await consume(consumption)).status, 409);
+      const savedBooking = (await store.listMaterialBookings(consumption.printId))[0];
+      assert.equal(savedBooking.status, "confirmed");
+      assert.equal(savedBooking.grams, 25);
+      const reverse = await reverseBooking(new Request("http://localhost/api/filament-bookings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relatedBookingId: savedBooking.id, confirmed: true }),
+      }));
+      assert.equal(reverse.status, 200);
+      assert.equal((await reverse.json()).booking.kind, "reversal");
+      assert.equal((await reverseBooking(new Request("http://localhost/api/filament-bookings", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relatedBookingId: savedBooking.id, confirmed: true }),
+      }))).status, 409);
+      assert.equal(stockWrites, 1);
+      assert.equal((await store.listMaterialBookings(consumption.printId)).length, 2);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -80,6 +99,7 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     assert.equal((await send("/prints/" + print.id + "/cost-inputs", "PUT", { quantity: 4 })).status, 200);
     assert.equal((await send("/settings", "PATCH", { general: { companyName: "API test" } })).status, 200);
     const reopened = createSqliteStore();
+    assert.equal((await reopened.listMaterialBookings(consumedPrintId)).length, 2);
     assert.equal((await reopened.getPrint(print.id)).displayName, "Persistent API print");
     assert.equal((await reopened.getPrintCostInputs(print.id)).quantity, 4);
     const renameResponse = await rename(new Request("http://localhost", {
@@ -89,15 +109,31 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     assert.equal(renameResponse.status, 200);
     assert.equal((await reopened.getPrint(print.id)).plate.plateName, "Named plate");
     assert.equal((await reopened.getSettings()).general.companyName, "API test");
+    const assignedPrinterId = (await reopened.getSettings()).defaultPrinterId;
     const orderBody = {
       customerName: "Persistent customer", status: "open", dueDate: "2026-12-01",
-      notes: "Test order", items: [{ printId: print.id, quantity: 2 }],
+      notes: "Test order", printerId: assignedPrinterId, items: [{ printId: print.id, quantity: 2 }],
     };
     const createdOrder = await createOrder(new Request("http://localhost/api/orders", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(orderBody),
     }));
     assert.equal(createdOrder.status, 201);
     const { order } = await createdOrder.json();
+    assert.equal(order.history[0].type, "created");
+    const secondOrderResponse = await createOrder(new Request("http://localhost/api/orders", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...orderBody, customerName: "Second queue order" }),
+    }));
+    assert.equal(secondOrderResponse.status, 201);
+    const { order: secondOrder } = await secondOrderResponse.json();
+    const reorderedQueue = await reorderQueue(new Request("http://localhost/api/orders/queue", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ printerId: assignedPrinterId, orderIds: [secondOrder.id, order.id] }),
+    }));
+    assert.equal(reorderedQueue.status, 200);
+    assert.deepEqual((await reopened.listOrders()).sort((left, right) =>
+      (left.queuePosition ?? 0) - (right.queuePosition ?? 0))
+      .map((item) => item.id), [secondOrder.id, order.id]);
     assert.equal((await reopened.listOrders())[0].customerName, "Persistent customer");
     assert.equal((await reopened.listOrders())[0].priority, "normal");
     const gcodeBytes = Buffer.from("; generated G-code\\nG28\\n");
@@ -229,6 +265,14 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     assert.equal(changedPriority.status, 200);
     assert.equal((await reopened.listOrders())[0].priority, "high");
     assert.equal((await reopened.listOrders())[0].status, "ready");
+    const completedOrder = await updateOrderStatus(new Request("http://localhost/api/orders/" + order.id, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "completed" }),
+    }), { params: Promise.resolve({ id: order.id }) });
+    assert.equal(completedOrder.status, 200);
+    const completedHistory = (await reopened.listOrders())[0].history;
+    assert.ok(completedHistory.some((event) => event.type === "updated"));
+    assert.ok(completedHistory.some((event) => event.type === "completed"));
     const invalidStatus = await updateOrderStatus(new Request("http://localhost/api/orders/" + order.id, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "invalid" }),
@@ -236,6 +280,9 @@ test("API writes survive reopening the SQLite backend in an isolated data direct
     assert.equal(invalidStatus.status, 400);
     assert.equal((await deleteOrder(new Request("http://localhost", { method: "DELETE" }), {
       params: Promise.resolve({ id: order.id }),
+    })).status, 200);
+    assert.equal((await deleteOrder(new Request("http://localhost", { method: "DELETE" }), {
+      params: Promise.resolve({ id: secondOrder.id }),
     })).status, 200);
     assert.equal((await reopened.listOrders()).length, 0);
     assert.equal(await orderGcodeFiles.read(order.id), null);

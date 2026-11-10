@@ -1,7 +1,8 @@
-import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import type { AccessoryStockMovement, AppSettings, Customer, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
 import { resolveDbConnection, type ResolvedDbConnection } from "../dbConfig";
-import type { ApplicationDataSnapshot, DataStore } from "./shared";
+import { materialBookingActiveKey, recordOrderDeliveryDate, type ApplicationDataSnapshot, type DataStore } from "./shared";
 import { originalArchives } from "../originalArchives";
+import { softwareUpdates } from "../softwareUpdates";
 
 // The active backend is resolved from the DB config saved via Settings (data/db-config.json),
 // falling back to DB_DRIVER/DATABASE_URL env vars if nothing was saved there yet.
@@ -37,8 +38,15 @@ export async function getSettings(): Promise<AppSettings> {
   return (await getStore()).getSettings();
 }
 
-export async function saveSettings(settings: AppSettings): Promise<void> {
-  return (await getStore()).saveSettings(settings);
+export async function saveSettings(settings: AppSettings, preserveManaged = false): Promise<void> {
+  await (await getStore()).saveSettings(settings, preserveManaged);
+  softwareUpdates.configure(settings.general);
+}
+
+export async function updateSettings(update: (current: AppSettings) => AppSettings): Promise<AppSettings> {
+  const settings = await (await getStore()).updateSettings(update);
+  softwareUpdates.configure(settings.general);
+  return settings;
 }
 
 export async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -101,8 +109,93 @@ export async function listOrders(): Promise<PrintOrder[]> {
   return (await getStore()).listOrders();
 }
 
-export async function saveOrder(order: PrintOrder): Promise<void> {
-  return (await getStore()).saveOrder(order);
+export async function listCustomers(): Promise<Customer[]> {
+  return (await getStore()).listCustomers();
+}
+
+export async function saveCustomer(customer: Customer, expectedUpdatedAt?: string): Promise<boolean> {
+  return (await getStore()).saveCustomer(customer, expectedUpdatedAt);
+}
+
+export function saveOrder(order: PrintOrder): Promise<PrintOrder>;
+export function saveOrder(order: PrintOrder, expectedUpdatedAt: string): Promise<PrintOrder | null>;
+export async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): Promise<PrintOrder | null> {
+  const store = await getStore();
+  const existing = (await store.listOrders()).find((item) => item.id === order.id);
+  if (expectedUpdatedAt) {
+    if (!existing || existing.updatedAt !== expectedUpdatedAt) return null;
+    order = { ...order, updatedAt: new Date(Math.max(Date.parse(order.updatedAt), Date.parse(existing.updatedAt) + 1)).toISOString() };
+  }
+  order = recordOrderDeliveryDate(order, existing);
+  let saved: PrintOrder;
+  if (!existing) {
+    const history = order.history ?? [
+      { type: "created" as const, at: order.createdAt },
+      ...(order.status === "completed" ? [{ type: "completed" as const, at: order.createdAt }] : []),
+    ];
+    saved = { ...order, history };
+  } else if (existing.updatedAt !== order.updatedAt) {
+    const history = existing.history ?? [{ type: "created" as const, at: existing.createdAt }];
+    saved = {
+      ...order,
+      history: [
+        ...history,
+        { type: "updated", at: order.updatedAt },
+        ...((["paymentStatus", "paymentMethod", "paidAmount", "paymentCurrency"] as const).some((field) => existing[field] !== order[field])
+          ? [{ type: "payment_updated" as const, at: order.updatedAt }] : []),
+        ...((["shippingStatus", "shippingMethod", "trackingNumber"] as const).some((field) => existing[field] !== order[field])
+          ? [{ type: "shipping_updated" as const, at: order.updatedAt, ...(existing.shippingStatus !== order.shippingStatus ? { shippingStatus: order.shippingStatus } : {}) }] : []),
+        ...(existing.status !== "completed" && order.status === "completed"
+          ? [{ type: "completed" as const, at: order.updatedAt }]
+          : []),
+      ],
+    };
+  } else {
+    saved = { ...order, history: order.history ?? existing.history };
+  }
+  if (!(await store.saveOrder(saved, expectedUpdatedAt))) return null;
+  return saved;
+}
+
+export async function saveOrderQueue(orders: PrintOrder[]): Promise<void> {
+  const store = await getStore();
+  const currentOrders = await store.listOrders();
+  const byId = new Map(currentOrders.map((order) => [order.id, order]));
+  const updatedAt = new Date().toISOString();
+  const updatedOrders = orders.map((order) => {
+    const current = byId.get(order.id);
+    if (!current) throw new Error("Auftrag nicht gefunden.");
+    const history = current.history ?? [{ type: "created" as const, at: current.createdAt }];
+    return {
+      ...current,
+      queuePosition: order.queuePosition,
+      updatedAt,
+      history: [...history, { type: "updated" as const, at: updatedAt }],
+    };
+  });
+  await store.saveOrderQueue(updatedOrders);
+}
+
+export async function listMaterialBookings(printId?: string): Promise<MaterialBooking[]> {
+  return (await getStore()).listMaterialBookings(printId);
+}
+
+export async function createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean> {
+  return (await getStore()).createMaterialBooking(booking, activeKey);
+}
+
+export async function saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void> {
+  return (await getStore()).saveMaterialBooking(booking, activeKey);
+}
+
+export async function listAccessoryStockMovements(): Promise<AccessoryStockMovement[]> {
+  return (await getStore()).listAccessoryStockMovements();
+}
+
+export async function applyAccessoryStockMovements(
+  movements: AccessoryStockMovement[],
+): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found"> {
+  return (await getStore()).applyAccessoryStockMovements(movements);
 }
 
 export async function deleteOrder(id: string): Promise<void> {
@@ -111,14 +204,20 @@ export async function deleteOrder(id: string): Promise<void> {
 
 export async function getApplicationDataSnapshot(): Promise<ApplicationDataSnapshot> {
   const store = await getStore();
-  const [settings, prints, orders] = await Promise.all([
+  const [settings, prints, orders, materialBookings, accessoryStockMovements, customers] = await Promise.all([
     store.getSettings(),
     store.listPrints(),
     store.listOrders(),
+    store.listMaterialBookings(),
+    store.listAccessoryStockMovements(),
+    store.listCustomers(),
   ]);
   return {
     settings,
+    customers,
     orders,
+    materialBookings,
+    accessoryStockMovements,
     prints: await Promise.all(prints.map(async (print) => ({
       print,
       costInputs: await store.getPrintCostInputs(print.id),
@@ -128,7 +227,8 @@ export async function getApplicationDataSnapshot(): Promise<ApplicationDataSnaps
 }
 
 export async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
-  return (await getStore()).replaceApplicationData(data);
+  await (await getStore()).replaceApplicationData(data);
+  softwareUpdates.configure(data.settings.general);
 }
 
 /** Copies all application data into a verified target store before it becomes active. */
@@ -143,7 +243,15 @@ export async function transferDatabaseData(targetConnection: ResolvedDbConnectio
     }
   }
 
+  const customers = await source.listCustomers();
+  const targetCustomerIds = new Set((await target.listCustomers()).map((customer) => customer.id));
+  if (customers.some((customer) => targetCustomerIds.has(customer.id))) {
+    throw new Error("Mindestens ein Kunde existiert bereits in der Zieldatenbank.");
+  }
   await target.saveSettings(settings);
+  for (const customer of customers) {
+    if (!(await target.saveCustomer(customer))) throw new Error(`Kunde existiert bereits in der Zieldatenbank: ${customer.id}`);
+  }
   for (const print of prints) {
     await target.insertPrint(print);
     for (const { plateIndex, model } of await source.listPrintModels(print.id)) {
@@ -154,5 +262,12 @@ export async function transferDatabaseData(targetConnection: ResolvedDbConnectio
   }
   for (const order of await source.listOrders()) {
     await target.saveOrder(order);
+  }
+  for (const booking of await source.listMaterialBookings()) {
+    await target.createMaterialBooking(booking, materialBookingActiveKey(booking));
+  }
+  const accessoryMovements = await source.listAccessoryStockMovements();
+  if (accessoryMovements.length) {
+    await target.importAccessoryStockMovements(accessoryMovements);
   }
 }

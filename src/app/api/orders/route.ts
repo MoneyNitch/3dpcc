@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { ApiError } from "@/lib/api/http";
-import { listOrders, listPrints, saveOrder } from "@/lib/db";
+import { getSettings, listCustomers, listOrders, listPrints, saveOrder } from "@/lib/db";
+import { orderCustomer } from "@/lib/customers";
 import { orderInputSchema, readOrderBody } from "@/lib/orders";
 import type { PrintOrder } from "@/lib/types";
 import { authorize } from "@/lib/auth/server";
@@ -30,17 +31,29 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Bitte prüfe Kunde, Status und Druckpositionen." }, { status: 400 });
   }
-  const prints = new Set((await listPrints()).map((print) => print.id));
+  const [printRecords, settings] = await Promise.all([listPrints(), getSettings()]);
+  const prints = new Set(printRecords.map((print) => print.id));
   if (parsed.data.items.some((item) => !prints.has(item.printId))) {
     return NextResponse.json({ error: "Mindestens ein zugeordneter Druck wurde nicht gefunden." }, { status: 400 });
   }
+  if (parsed.data.printerId && !settings.printers.some((printer) => printer.id === parsed.data.printerId)) {
+    return NextResponse.json({ error: "Der ausgewählte Drucker wurde nicht gefunden." }, { status: 400 });
+  }
   const now = new Date().toISOString();
+  const customer = parsed.data.customerId
+    ? (await listCustomers()).find((customer) => customer.id === parsed.data.customerId && !customer.archived)
+    : undefined;
+  if (parsed.data.customerId && !customer) {
+    return NextResponse.json({ error: "customers.error.notFound" }, { status: 400 });
+  }
   const order: PrintOrder = {
     id: randomUUID(),
     ...parsed.data,
+    ...(customer ? orderCustomer(customer) : { customerId: null }),
+    queuePosition: undefined,
     createdAt: now,
     updatedAt: now,
   };
-  await saveOrder(order);
-  return NextResponse.json({ order }, { status: 201, headers: { "Cache-Control": "private, no-store" } });
+  const saved = await saveOrder(order);
+  return NextResponse.json({ order: saved }, { status: 201, headers: { "Cache-Control": "private, no-store" } });
 }

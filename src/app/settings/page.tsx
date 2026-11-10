@@ -1,4 +1,5 @@
 import { getSettings } from "@/lib/db";
+import { redirect } from "next/navigation";
 import { getDbConfigView } from "@/lib/dbConfig";
 import { translate } from "@/lib/i18n";
 import { SettingsForm, type SettingsTab } from "@/components/SettingsForm";
@@ -19,7 +20,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const can = (permission: Parameters<typeof hasPermission>[1]) => hasPermission(user, permission, enabled);
   const manageUsers = Boolean(enabled && user && can("users.manage"));
   const { tab } = await searchParams;
-  const initialTab: SettingsTab = tab === "users" && manageUsers ? "users" : "general";
+  if (tab === "accessories") redirect("/accessories");
+  const initialTab: SettingsTab = tab === "software" ? "software" : tab === "users" && manageUsers ? "users" : "general";
   const settings = await getSettings();
   const lang = settings.general.language;
   const t = (key: Parameters<typeof translate>[1]) =>

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CURRENCY_CODES } from "../currency";
 import { externalSpoolSchema } from "../externalFilaments";
+import { labelTemplatesSchema } from "../labelTemplates";
 
 const text = z.string().max(2000);
 export const idSchema = z.string().min(1).max(100);
@@ -14,12 +15,42 @@ export const materialSchema = z.strictObject({
   id: idSchema, name, type: z.string().trim().min(1).max(100), color, pricePerKg: amount,
 });
 export const accessorySchema = z.strictObject({
-  id: idSchema, name, pricePerPack: amount, unitsPerPack: z.number().positive().max(1_000_000),
+  id: idSchema, name, pricePerPack: amount, unitsPerPack: z.number().int().positive().max(1_000_000),
+  numericId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER - 1).optional(),
+  stockQuantity: z.number().int().min(0).max(1_000_000_000).default(0),
+});
+export const accessoryStockMovementSchema = z.strictObject({
+  id: idSchema,
+  accessoryId: idSchema,
+  accessoryName: name,
+  quantity: z.number().int().finite().min(-1_000_000_000).max(1_000_000_000).refine((value) => value !== 0),
+  kind: z.enum(["receipt", "adjustment", "consumption"]),
+  reference: name,
+  referenceKey: z.string().max(255).nullable(),
+  createdAt: z.iso.datetime(),
 });
 export const printerSchema = z.strictObject({
   id: idSchema, name, powerConsumptionW: amount, purchasePrice: amount,
   lifetimeHours: z.number().positive().max(1_000_000), maintenanceCostPerHour: amount,
 });
+const productTypeSchema = z.strictObject({
+  id: z.uuid(), name: z.string().trim().min(1).max(100),
+  prefix: z.string().regex(/^[A-Za-z0-9._-]{1,30}$/),
+  digits: z.number().int().min(1).max(12),
+  nextNumber: z.number().int().min(1).max(1_000_000_001),
+  fileName: z.string().max(255),
+  linkedPrintId: z.uuid().nullable(),
+  imageMode: z.enum(["print", "custom", "none"]),
+  imageBase64: z.string().max(7_000_000)
+    .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).nullable(),
+  serialNumbers: z.array(z.strictObject({
+    serialNumber: z.string().min(1).max(50),
+    orderId: z.uuid().nullable(),
+  })).max(10_000).refine((serials) =>
+    new Set(serials.map((serial) => serial.serialNumber)).size === serials.length,
+  "Product serial numbers must be unique."),
+}).refine((product) => product.imageMode !== "custom" || product.imageBase64 !== null,
+  "Custom product images must be provided.");
 const costLine = z.enum(["material", "extraMaterials", "energy", "machine", "labor", "packaging", "margin", "tax"]);
 export const templateSchema = z.strictObject({
   id: idSchema, name, paperFormat: z.enum(["A4", "A5", "Letter", "Legal"]),
@@ -42,9 +73,25 @@ const numberingSchema = z.strictObject({
   prefix: z.string().min(1).max(50), nextNumber: z.number().int().positive().max(1_000_000_000),
   digits: z.number().int().min(1).max(12),
 });
+const featuresSchema = z.strictObject({
+  customers: z.boolean(),
+  products: z.boolean(),
+  orders: z.boolean(),
+  invoices: z.boolean(),
+  quotes: z.boolean(),
+});
 export const settingsSchema = z.strictObject({
+  nextAccessoryNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(1),
+  features: featuresSchema.default({ customers: true, products: true, orders: true, invoices: true, quotes: true }),
+  labelTemplates: labelTemplatesSchema.default([]),
+  productTypes: z.array(productTypeSchema).max(1000).default([]).refine(uniqueIds, "Product type IDs must be unique.")
+    .refine((items) => new Set(items.map((item) => item.prefix.toLowerCase())).size === items.length, "Product prefixes must be unique."),
   materials: z.array(materialSchema).max(1000).refine(uniqueIds, "Material IDs must be unique."),
-  accessoryMaterials: z.array(accessorySchema).max(1000).refine(uniqueIds, "Accessory IDs must be unique."),
+  accessoryMaterials: z.array(accessorySchema).max(1000).refine(uniqueIds, "Accessory IDs must be unique.")
+    .refine((items) => {
+      const numbers = items.flatMap((item) => item.numericId === undefined ? [] : [item.numericId]);
+      return new Set(numbers).size === numbers.length;
+    }, "Accessory numbers must be unique."),
   printers: z.array(printerSchema).min(1).max(1000).refine(uniqueIds, "Printer IDs must be unique."),
   invoiceTemplates: z.array(templateSchema).max(100).refine(uniqueIds, "Template IDs must be unique."),
   quoteTemplates: z.array(templateSchema).max(100).refine(uniqueIds, "Template IDs must be unique."),
@@ -57,6 +104,8 @@ export const settingsSchema = z.strictObject({
     language: z.string().min(2).max(50), currency: z.enum(CURRENCY_CODES),
     enable3dPreview: z.boolean(), retainOriginalArchives: z.boolean().default(false),
     previewComputePercent: z.number().int().min(10).max(100),
+    fetchGithubChangelog: z.boolean().default(true),
+    checkGithubUpdates: z.boolean().default(true),
     companyName: text, companyAddress: text, companyEmail: text, companyPhone: text, companyTaxId: text, companyIban: text,
   }),
   customLanguagePacks: z.array(z.strictObject({
@@ -71,6 +120,10 @@ export const settingsSchema = z.strictObject({
   path: ["general", "language"], message: "Selected language must be installed.",
 });
 export const settingsPatchSchema = z.strictObject(settingsSchema.shape).partial().extend({
+  features: featuresSchema.partial().optional(),
+  labelTemplates: labelTemplatesSchema.optional(),
+  productTypes: settingsSchema.shape.productTypes.unwrap().optional(),
+  nextAccessoryNumber: settingsSchema.shape.nextAccessoryNumber.unwrap().optional(),
   general: settingsSchema.shape.general.partial().optional(),
   costs: settingsSchema.shape.costs.partial().optional(),
   numbering: z.strictObject({
@@ -86,7 +139,10 @@ export const costInputsSchema = z.strictObject({
   externalSpools: z.record(idSchema, externalSpoolSchema),
   quantity: z.number().int().positive().max(1_000_000),
   energyKwhOverride: amount.nullable(),
-  extraCosts: z.array(z.strictObject({ id: idSchema, name, cost: amount, quantity: z.number().positive().max(1_000_000) }))
+  extraCosts: z.array(z.strictObject({
+    id: idSchema, name, cost: amount, quantity: z.number().positive().max(1_000_000),
+    accessoryId: idSchema.optional(),
+  }))
     .max(1000).refine(uniqueIds, "Extra cost IDs must be unique."),
   printerId: idSchema.nullable(),
 });

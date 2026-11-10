@@ -55,19 +55,39 @@ export async function PUT(req: NextRequest) {
   if (body?.general?.retainOriginalArchives !== undefined && typeof body.general.retainOriginalArchives !== "boolean") {
     return NextResponse.json({ error: "Die Aufbewahrung von Originalarchiven muss aktiviert oder deaktiviert sein." }, { status: 400 });
   }
+  if (body?.features !== undefined) {
+    if (typeof body.features !== "object" || body.features === null || Array.isArray(body.features)) {
+      return NextResponse.json({ error: "Die Funktionsschalter müssen als Objekt übermittelt werden." }, { status: 400 });
+    }
+    for (const feature of ["customers", "products", "orders", "invoices", "quotes"] as const) {
+      if (body.features[feature] !== undefined && typeof body.features[feature] !== "boolean") {
+        return NextResponse.json({ error: "Die Funktionsschalter müssen aktiviert oder deaktiviert sein." }, { status: 400 });
+      }
+    }
+  }
+  for (const field of ["fetchGithubChangelog", "checkGithubUpdates"] as const) {
+    if (body?.general?.[field] !== undefined && typeof body.general[field] !== "boolean") {
+      return NextResponse.json({ error: "Die GitHub-Funktionen müssen aktiviert oder deaktiviert sein." }, { status: 400 });
+    }
+  }
   const duty = body?.general?.previewComputePercent;
   if (duty !== undefined && (typeof duty !== "number" || !Number.isInteger(duty) || duty < 10 || duty > 100)) {
     return NextResponse.json({ error: "Die Hintergrund-Rechenleistung muss zwischen 10 und 100 liegen." }, { status: 400 });
   }
-  const next = migrateSettings(body);
+  const currentSettings = await getSettings();
+  const next = {
+    ...migrateSettings(body),
+    accessoryMaterials: currentSettings.accessoryMaterials,
+    labelTemplates: currentSettings.labelTemplates,
+    productTypes: currentSettings.productTypes,
+  };
   if (authEnabled()) {
     const user = await requestIdentity(req, true);
-    const current = await getSettings();
-    if (!canUpdateSettings(user, current, next)) {
+    if (!canUpdateSettings(user, currentSettings, next)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
   }
-  await saveSettings(next);
+  await saveSettings(next, true);
   (await getPreviewQueue()).start();
   return NextResponse.json({ ok: true });
 }

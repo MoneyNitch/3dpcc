@@ -1,8 +1,8 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
-import type { AppSettings, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
-import { defaultSettings, migrateSettings, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
+import type { AccessoryStockMovement, AppSettings, Customer, MaterialBooking, ParsedPrint, PrintCostInputs, PrintOrder } from "../types";
+import { defaultSettings, materialBookingActiveKey, migrateSettings, preserveAccessoryStock, PrintLinkedToOrderError, printModelKey, type ApplicationDataSnapshot, type DataStore } from "./shared";
 
 function openDb(): Database.Database {
   const dataDir = path.join(process.cwd(), "data");
@@ -22,6 +22,11 @@ function openDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      updated_at TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS prints (
       id TEXT PRIMARY KEY,
       file_name TEXT NOT NULL,
@@ -48,6 +53,20 @@ function openDb(): Database.Database {
       quantity INTEGER NOT NULL,
       PRIMARY KEY (order_id, print_id)
     );
+    CREATE TABLE IF NOT EXISTS material_bookings (
+      id TEXT PRIMARY KEY,
+      print_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      active_key TEXT UNIQUE,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS accessory_stock_movements (
+      id TEXT PRIMARY KEY,
+      accessory_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      reference_key TEXT UNIQUE,
+      data TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -55,6 +74,20 @@ function openDb(): Database.Database {
 /** Local, file-based backend — no external server required. */
 export function createSqliteStore(): DataStore {
   const db = openDb();
+
+  async function listCustomers(): Promise<Customer[]> {
+    return (db.prepare("SELECT data FROM customers ORDER BY updated_at DESC").all() as { data: string }[])
+      .map((row) => JSON.parse(row.data) as Customer);
+  }
+
+  async function saveCustomer(customer: Customer, expectedUpdatedAt?: string): Promise<boolean> {
+    if (expectedUpdatedAt) {
+      return db.prepare("UPDATE customers SET updated_at = ?, data = ? WHERE id = ? AND updated_at = ?")
+        .run(customer.updatedAt, JSON.stringify(customer), customer.id, expectedUpdatedAt).changes === 1;
+    }
+    return db.prepare("INSERT INTO customers (id, updated_at, data) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING")
+      .run(customer.id, customer.updatedAt, JSON.stringify(customer)).changes === 1;
+  }
 
   async function getSettings(): Promise<AppSettings> {
     const row = db.prepare("SELECT data FROM settings WHERE id = 1").get() as
@@ -67,10 +100,22 @@ export function createSqliteStore(): DataStore {
     return migrateSettings(JSON.parse(row.data));
   }
 
-  async function saveSettings(settings: AppSettings): Promise<void> {
-    db.prepare(
-      "INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data"
-    ).run(JSON.stringify(settings));
+  async function updateSettings(update: (current: AppSettings) => AppSettings): Promise<AppSettings> {
+    const save = db.transaction(() => {
+      const row = db.prepare("SELECT data FROM settings WHERE id = 1").get() as { data: string } | undefined;
+      const next = update(row ? migrateSettings(JSON.parse(row.data)) : structuredClone(defaultSettings));
+      db.prepare(
+        "INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data"
+      ).run(JSON.stringify(next));
+      return next;
+    });
+    return save.immediate();
+  }
+
+  async function saveSettings(settings: AppSettings, preserveManaged = false): Promise<void> {
+    await updateSettings((current) => preserveManaged
+      ? { ...settings, nextAccessoryNumber: current.nextAccessoryNumber, accessoryMaterials: current.accessoryMaterials, labelTemplates: current.labelTemplates, productTypes: current.productTypes }
+      : preserveAccessoryStock(settings, current));
   }
 
   async function insertPrint(print: ParsedPrint): Promise<void> {
@@ -163,25 +208,126 @@ export function createSqliteStore(): DataStore {
       .map((row) => JSON.parse(row.data) as PrintOrder);
   }
 
-  async function saveOrder(order: PrintOrder): Promise<void> {
-    db.transaction(() => {
-      db.prepare(
+  async function saveOrder(order: PrintOrder, expectedUpdatedAt?: string): Promise<boolean> {
+    return db.transaction(() => {
+      if (expectedUpdatedAt) {
+        const result = db.prepare("UPDATE orders SET updated_at = ?, data = ? WHERE id = ? AND updated_at = ?")
+          .run(order.updatedAt, JSON.stringify(order), order.id, expectedUpdatedAt);
+        if (result.changes !== 1) return false;
+      } else db.prepare(
         "INSERT INTO orders (id, updated_at, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, data = excluded.data"
       ).run(order.id, order.updatedAt, JSON.stringify(order));
       db.prepare("DELETE FROM order_items WHERE order_id = ?").run(order.id);
       const itemStatement = db.prepare("INSERT INTO order_items (order_id, print_id, quantity) VALUES (?, ?, ?)");
       for (const item of order.items) itemStatement.run(order.id, item.printId, item.quantity);
+      return true;
     }).immediate();
+  }
+
+  async function saveOrderQueue(orders: PrintOrder[]): Promise<void> {
+    const update = db.transaction(() => {
+      const statement = db.prepare("UPDATE orders SET updated_at = ?, data = ? WHERE id = ?");
+      for (const order of orders) {
+        const result = statement.run(order.updatedAt, JSON.stringify(order), order.id);
+        if (result.changes !== 1) throw new Error("Auftrag nicht gefunden.");
+      }
+    });
+    update.immediate();
   }
 
   async function deleteOrder(id: string): Promise<void> {
     db.prepare("DELETE FROM orders WHERE id = ?").run(id);
   }
 
+  async function listMaterialBookings(printId?: string): Promise<MaterialBooking[]> {
+    const rows = printId
+      ? db.prepare("SELECT data FROM material_bookings WHERE print_id = ? ORDER BY created_at DESC").all(printId)
+      : db.prepare("SELECT data FROM material_bookings ORDER BY created_at DESC").all();
+    return (rows as { data: string }[]).map((row) => JSON.parse(row.data) as MaterialBooking);
+  }
+
+  async function createMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<boolean> {
+    const result = db.prepare(
+      "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING"
+    ).run(booking.id, booking.printId, booking.createdAt, activeKey, JSON.stringify(booking));
+    return result.changes === 1;
+  }
+
+  async function saveMaterialBooking(booking: MaterialBooking, activeKey: string | null): Promise<void> {
+    const result = db.prepare(
+      "UPDATE material_bookings SET active_key = ?, data = ? WHERE id = ?"
+    ).run(activeKey, JSON.stringify(booking), booking.id);
+    if (result.changes !== 1) throw new Error("Materialbuchung nicht gefunden.");
+  }
+
+  async function listAccessoryStockMovements(): Promise<AccessoryStockMovement[]> {
+    const rows = db.prepare("SELECT data FROM accessory_stock_movements ORDER BY created_at DESC").all() as { data: string }[];
+    return rows.map((row) => JSON.parse(row.data) as AccessoryStockMovement);
+  }
+
+  async function applyAccessoryStockMovements(
+    movements: AccessoryStockMovement[],
+  ): Promise<"applied" | "duplicate" | "insufficient" | "limit" | "not_found"> {
+    const apply = db.transaction(() => {
+      const existing = db.prepare("SELECT data FROM settings WHERE id = 1").get() as { data: string } | undefined;
+      if (!existing) return "not_found" as const;
+      const settings = migrateSettings(JSON.parse(existing.data));
+      const items = new Map(settings.accessoryMaterials.map((item) => [item.id, item]));
+      if (movements.some((movement) => !items.has(movement.accessoryId))) return "not_found" as const;
+      const hasDuplicate = db.prepare(
+        "SELECT 1 FROM accessory_stock_movements WHERE reference_key = ?"
+      );
+      if (movements.some((movement) => movement.referenceKey && hasDuplicate.get(movement.referenceKey))) {
+        return "duplicate" as const;
+      }
+      const deltas = new Map<string, number>();
+      for (const movement of movements) {
+        deltas.set(movement.accessoryId, (deltas.get(movement.accessoryId) ?? 0) + movement.quantity);
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta < 0)) {
+        return "insufficient" as const;
+      }
+      if ([...deltas].some(([id, delta]) => (items.get(id)?.stockQuantity ?? 0) + delta > 1_000_000_000)) {
+        return "limit" as const;
+      }
+      const updatedSettings: AppSettings = {
+        ...settings,
+        accessoryMaterials: settings.accessoryMaterials.map((item) => ({
+          ...item,
+          stockQuantity: item.stockQuantity + (deltas.get(item.id) ?? 0),
+        })),
+      };
+      db.prepare("UPDATE settings SET data = ? WHERE id = 1").run(JSON.stringify(updatedSettings));
+      const insert = db.prepare(
+        "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const movement of movements) {
+        insert.run(movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement));
+      }
+      return "applied" as const;
+    });
+    return apply.immediate();
+  }
+
+  async function importAccessoryStockMovements(movements: AccessoryStockMovement[]): Promise<void> {
+    const insert = db.transaction(() => {
+      const statement = db.prepare(
+        "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const movement of movements) {
+        statement.run(movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement));
+      }
+    });
+    insert.immediate();
+  }
+
   async function replaceApplicationData(data: ApplicationDataSnapshot): Promise<void> {
     const replace = db.transaction(() => {
-      db.exec("DELETE FROM order_items; DELETE FROM print_models; DELETE FROM prints; DELETE FROM orders; DELETE FROM settings;");
+      db.exec("DELETE FROM order_items; DELETE FROM material_bookings; DELETE FROM accessory_stock_movements; DELETE FROM print_models; DELETE FROM prints; DELETE FROM orders; DELETE FROM settings;");
       db.prepare("INSERT INTO settings (id, data) VALUES (1, ?)").run(JSON.stringify(data.settings));
+      db.exec("DELETE FROM customers");
+      const customerStatement = db.prepare("INSERT INTO customers (id, updated_at, data) VALUES (?, ?, ?)");
+      for (const customer of data.customers ?? []) customerStatement.run(customer.id, customer.updatedAt, JSON.stringify(customer));
       const printStatement = db.prepare(
         "INSERT INTO prints (id, file_name, created_at, data, cost_inputs) VALUES (?, ?, ?, ?, ?)"
       );
@@ -204,11 +350,26 @@ export function createSqliteStore(): DataStore {
         orderStatement.run(order.id, order.updatedAt, JSON.stringify(order));
         for (const item of order.items) orderItemStatement.run(order.id, item.printId, item.quantity);
       }
+      const bookingStatement = db.prepare(
+        "INSERT INTO material_bookings (id, print_id, created_at, active_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const booking of data.materialBookings) {
+        bookingStatement.run(booking.id, booking.printId, booking.createdAt, materialBookingActiveKey(booking), JSON.stringify(booking));
+      }
+      const accessoryMovementStatement = db.prepare(
+        "INSERT INTO accessory_stock_movements (id, accessory_id, created_at, reference_key, data) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (const movement of data.accessoryStockMovements) {
+        accessoryMovementStatement.run(movement.id, movement.accessoryId, movement.createdAt, movement.referenceKey, JSON.stringify(movement));
+      }
     });
     replace.immediate();
   }
 
   return {
+    updateSettings,
+    listCustomers,
+    saveCustomer,
     getSettings,
     saveSettings,
     insertPrint,
@@ -224,7 +385,14 @@ export function createSqliteStore(): DataStore {
     savePrintCostInputs,
     listOrders,
     saveOrder,
+    saveOrderQueue,
     deleteOrder,
+    listMaterialBookings,
+    createMaterialBooking,
+    saveMaterialBooking,
+    listAccessoryStockMovements,
+    applyAccessoryStockMovements,
+    importAccessoryStockMovements,
     replaceApplicationData,
   };
 }

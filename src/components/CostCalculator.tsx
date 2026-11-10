@@ -1,7 +1,7 @@
 "use client";
 import { usePermission } from "@/lib/auth/context";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AppSettings } from "@/lib/types";
 import { calculateAllPlatesCost, calculateCost, findFilamentPrice, findPrinter } from "@/lib/costCalculator";
@@ -10,14 +10,17 @@ import { useCostInputs } from "@/lib/costInputsContext";
 import { useLocale } from "@/lib/locale";
 import { currencySymbol, getIntlLocale, parseLocalizedNumber } from "@/lib/i18n";
 import { usePlateSelection } from "@/lib/plateSelectionContext";
+import type { MaterialBooking } from "@/lib/types";
 
 export function CostCalculator({
   settings,
+  printId,
 }: {
   settings: AppSettings;
+  printId: string;
 }) {
   const { plates, plate, allSelected } = usePlateSelection();
-  const { inputs, update, save, saved, saveError } = useCostInputs();
+  const { inputs, update, save, saved, saveError, inventoryBusy, setInventoryBusy, inventoryRevision } = useCostInputs();
   const canSave = usePermission("prints.write");
   const { t, money, currency, lang } = useLocale();
   const [spoolResults, setSpoolResults] = useState<ExternalSpoolResult[] | null>(null);
@@ -25,7 +28,8 @@ export function CostCalculator({
   const [spoolError, setSpoolError] = useState(false);
   const [priceInputVersion, setPriceInputVersion] = useState(0);
   const [consuming, setConsuming] = useState(false);
-  const [consumedKeys, setConsumedKeys] = useState<string[]>([]);
+  const [bookings, setBookings] = useState<MaterialBooking[]>([]);
+  const [journalError, setJournalError] = useState(false);
   const [consumptionMessage, setConsumptionMessage] = useState<{ error: boolean; text: string } | null>(null);
   const spools = spoolResults?.flatMap((result) => result.spools) ?? [];
   const unit = currencySymbol(currency, lang);
@@ -60,14 +64,31 @@ export function CostCalculator({
   }, [allSelected, plates, plate]);
   const spoolConsumption = spoolConsumptionForFilaments(costFilaments, inputs.externalSpools ?? {}, inputs.quantity);
 
+  const loadBookings = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/filament-bookings?printId=${encodeURIComponent(printId)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load material booking journal.");
+      const body: { bookings: MaterialBooking[] } = await response.json();
+      setBookings(body.bookings);
+      setJournalError(false);
+    } catch {
+      setJournalError(true);
+    }
+  }, [printId]);
+
+  useEffect(() => {
+    void Promise.resolve().then(loadBookings);
+  }, [loadBookings]);
+
   async function consumeSpool(key: string) {
     const entry = spoolConsumption.get(key);
-    if (!entry || consuming) return;
+    if (!entry || consuming || inventoryBusy) return;
     if (!window.confirm(t("filamentDb.consumeConfirm", {
       name: entry.spool.name,
       grams: formatDecimal(entry.grams, 3),
     }))) return;
     setConsuming(true);
+    setInventoryBusy(true);
     setConsumptionMessage(null);
     let knownRejection = false;
     try {
@@ -75,6 +96,7 @@ export function CostCalculator({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          printId,
           provider: entry.spool.provider,
           sourceUrl: entry.spool.sourceUrl,
           id: entry.spool.id,
@@ -82,22 +104,53 @@ export function CostCalculator({
           confirmed: true,
         }),
       });
-      const body: { error?: string } = await response.json();
+      const body: { error?: string; booking?: MaterialBooking } = await response.json();
       if (!response.ok) {
         knownRejection = body.error !== undefined && body.error !== "uncertain";
         throw new Error(t(`filamentDb.consumeError.${body.error ?? "uncertain"}`));
       }
-      setConsumedKeys((keys) => [...keys, key]);
+      if (body.booking) setBookings((current) => [body.booking!, ...current]);
       setConsumptionMessage({ error: false, text: t("filamentDb.consumed") });
       await loadSpools();
     } catch (error) {
-      if (!knownRejection) setConsumedKeys((keys) => keys.includes(key) ? keys : [...keys, key]);
+      await loadBookings();
       setConsumptionMessage({
         error: true,
         text: knownRejection && error instanceof Error ? error.message : t("filamentDb.consumeError.uncertain"),
       });
     } finally {
       setConsuming(false);
+      setInventoryBusy(false);
+    }
+  }
+
+  async function reverseBooking(booking: MaterialBooking) {
+    if (consuming || inventoryBusy) return;
+    if (!window.confirm(t("filamentDb.reverseConfirm"))) return;
+    setConsuming(true);
+    setInventoryBusy(true);
+    setConsumptionMessage(null);
+    try {
+      const response = await fetch("/api/filament-bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relatedBookingId: booking.id, confirmed: true }),
+      });
+      const body: { error?: string; booking?: MaterialBooking } = await response.json();
+      if (!response.ok || !body.booking) {
+        throw new Error(t(`filamentDb.reverseError.${body.error ?? "save"}`));
+      }
+      setBookings((current) => [body.booking!, ...current]);
+      setConsumptionMessage({ error: false, text: t("filamentDb.reversed") });
+    } catch (error) {
+      setConsumptionMessage({
+        error: true,
+        text: error instanceof Error ? error.message : t("filamentDb.reverseError.save"),
+      });
+      await loadBookings();
+    } finally {
+      setConsuming(false);
+      setInventoryBusy(false);
     }
   }
 
@@ -108,7 +161,7 @@ export function CostCalculator({
     update("materialPriceOverrides", { ...inputs.materialPriceOverrides, [filamentId]: pricePerKg });
   }
 
-  async function loadSpools() {
+  const loadSpools = useCallback(async () => {
     setLoadingSpools(true);
     setSpoolError(false);
     try {
@@ -121,7 +174,12 @@ export function CostCalculator({
     } finally {
       setLoadingSpools(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (inventoryRevision === 0) return;
+    void Promise.resolve().then(() => Promise.all([loadBookings(), loadSpools()]));
+  }, [inventoryRevision, loadBookings, loadSpools]);
 
   function selectSpool(filamentId: string, key: string) {
     const externalSpools = { ...inputs.externalSpools };
@@ -241,15 +299,53 @@ export function CostCalculator({
             </div>
           );
         })}
-        {[...spoolConsumption].map(([key, { spool, grams }]) => (
-          <button key={key} type="button"
-            disabled={!canSave || consuming || consumedKeys.includes(key) || !spool.sourceUrl || grams <= 0}
-            onClick={() => void consumeSpool(key)}
-            className="rounded-lg border border-orange-300 px-3 py-2 text-left text-xs text-orange-700 disabled:opacity-50 dark:border-orange-800 dark:text-orange-300">
-            {consumedKeys.includes(key) ? t("filamentDb.consumeHandled") :
-              t("filamentDb.consume", { name: spool.name, grams: formatDecimal(grams, 3) })}
-          </button>
-        ))}
+        {[...spoolConsumption].map(([key, { spool, grams }]) => {
+          const handled = bookings.some((booking) =>
+            booking.kind === "consumption" && booking.provider === spool.provider &&
+            booking.sourceUrl === spool.sourceUrl && booking.spoolId === spool.id &&
+            ["pending", "confirmed", "uncertain"].includes(booking.status));
+          return (
+            <button key={key} type="button"
+              disabled={!canSave || consuming || inventoryBusy || handled || journalError || !spool.sourceUrl || grams <= 0}
+              onClick={() => void consumeSpool(key)}
+              className="rounded-lg border border-orange-300 px-3 py-2 text-left text-xs text-orange-700 disabled:opacity-50 dark:border-orange-800 dark:text-orange-300">
+              {handled ? t("filamentDb.consumeHandled") :
+                t("filamentDb.consume", { name: spool.name, grams: formatDecimal(grams, 3) })}
+            </button>
+          );
+        })}
+        <section className="mt-2 rounded-lg border border-slate-200 p-3 text-xs dark:border-slate-700">
+          <h3 className="font-semibold">{t("filamentDb.journalTitle")}</h3>
+          {journalError ? <p role="alert" className="mt-2 text-red-600 dark:text-red-400">
+            {t("filamentDb.journalError")}
+          </p> : bookings.length === 0 ? <p className="mt-2 text-slate-500 dark:text-slate-400">
+            {t("filamentDb.journalEmpty")}
+          </p> : <ol className="mt-2 flex flex-col gap-3">
+            {bookings.map((booking) => {
+              const reversed = bookings.some((entry) =>
+                entry.kind === "reversal" && entry.relatedBookingId === booking.id);
+              return (
+                <li key={booking.id} className="flex flex-wrap items-start justify-between gap-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+                  <div>
+                    <p className="font-medium">
+                      {t(`filamentDb.entry.${booking.kind}`, { grams: formatDecimal(booking.grams, 3) })} · {booking.spoolName}
+                    </p>
+                    <p className="mt-1 text-slate-500 dark:text-slate-400">
+                      {booking.provider === "spoolman" ? "Spoolman" : "FilaMan"} #{booking.spoolId} · {t(booking.kind === "reversal" ? "filamentDb.status.local" : `filamentDb.status.${booking.status}`)} · {new Date(booking.createdAt).toLocaleString(getIntlLocale(lang))}
+                    </p>
+                  </div>
+                  {booking.kind === "consumption" && booking.status === "confirmed" && !reversed &&
+                    canSave && <button type="button" disabled={consuming || inventoryBusy} onClick={() => void reverseBooking(booking)}
+                      className="rounded border border-slate-300 px-2 py-1 text-orange-700 disabled:opacity-50 dark:border-slate-600 dark:text-orange-400">
+                      {t("filamentDb.reverse")}
+                    </button>}
+                  {booking.kind === "consumption" && reversed &&
+                    <span className="text-slate-500 dark:text-slate-400">{t("filamentDb.reversedStatus")}</span>}
+                </li>
+              );
+            })}
+          </ol>}
+        </section>
         {consumptionMessage && (
           <p role={consumptionMessage.error ? "alert" : "status"}
             className={`text-xs ${consumptionMessage.error ? "text-red-600 dark:text-red-400" : "text-green-700 dark:text-green-400"}`}>

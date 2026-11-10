@@ -6,6 +6,7 @@ import { permissions, type AuthUser, type Permission, type Role } from "@/lib/au
 import type { ApiKeyView } from "@/lib/auth/store";
 import { passwordCharacterRules, passwordPolicyError, type PasswordPolicy } from "@/lib/auth/passwordPolicy";
 import { PasswordRequirements } from "./PasswordRequirements";
+import { HttpWarning } from "./HttpWarning";
 
 interface Overview { users: AuthUser[]; roles: Role[]; keys: ApiKeyView[]; passwordPolicy: PasswordPolicy }
 const inputClass = "mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
@@ -161,15 +162,25 @@ export function UserManagement({ initial, actorId }: { initial: Overview; actorI
             <button type="button" className={buttonClass} onClick={() => { resetRole(); setRoleFormOpen(true); }}>{t("auth.createRole")}</button>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {overview.roles.map((role) => <div key={role.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/50">
-              <div className="min-w-0">
-                <p className="truncate font-medium text-slate-800 dark:text-slate-100">{role.name}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{role.permissions.length} {t("auth.permissionCount")}</p>
+            {overview.roles.map((role) => <div key={role.id} className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-slate-800 dark:text-slate-100">{role.name}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{role.permissions.length} {t("auth.permissionCount")}</p>
+                </div>
+                {!role.builtIn && <div className="flex shrink-0 gap-1">
+                  <button type="button" className={buttonClass} onClick={() => editRole(role)}>{t("auth.edit")}</button>
+                  <button type="button" className={`${buttonClass} text-red-600 dark:text-red-400`} onClick={() => { if (window.confirm(t("auth.confirmDelete"))) void send({ action: "deleteRole", id: role.id }); }}>{t("auth.delete")}</button>
+                </div>}
               </div>
-              {!role.builtIn && <div className="flex shrink-0 gap-1">
-                <button type="button" className={buttonClass} onClick={() => editRole(role)}>{t("auth.edit")}</button>
-                <button type="button" className={`${buttonClass} text-red-600 dark:text-red-400`} onClick={() => { if (window.confirm(t("auth.confirmDelete"))) void send({ action: "deleteRole", id: role.id }); }}>{t("auth.delete")}</button>
-              </div>}
+              <details className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                <summary className="cursor-pointer font-medium">{t("auth.viewPermissions")}</summary>
+                {role.builtIn && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{t("auth.builtInPermissionsNote")}</p>}
+                {role.permissions.length === 0 ? <p className="mt-2">{t("auth.noPermissions")}</p> :
+                  <ul className="mt-2 list-disc space-y-1 pl-5">
+                    {role.permissions.map((permission) => <li key={permission}>{t(`auth.permission.${permission}`)}</li>)}
+                  </ul>}
+              </details>
             </div>)}
           </div>
           {roleFormOpen && <form onSubmit={saveRole} className="mt-4 flex flex-col gap-3 rounded-lg border border-orange-200 bg-orange-50/50 p-4 dark:border-orange-900 dark:bg-orange-950/20">
@@ -187,6 +198,7 @@ export function UserManagement({ initial, actorId }: { initial: Overview; actorI
             </div>
             <button type="button" className={buttonClass} onClick={() => setKeyFormOpen((open) => !open)}>{t(keyFormOpen ? "auth.cancel" : "auth.createKey")}</button>
           </div>
+          <HttpWarning />
           {token && <div role="status" className="my-3 rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm dark:border-orange-800 dark:bg-orange-950/30"><p>{t("auth.keyOnce")}</p><code className="my-2 block select-all break-all">{token}</code><button type="button" className={buttonClass} onClick={() => setToken("")}>{t("auth.dismissKey")}</button></div>}
           {overview.keys.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">{t("auth.noApiKeys")}</p>}
           <div className="grid gap-2 sm:grid-cols-2">

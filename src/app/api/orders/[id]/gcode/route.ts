@@ -45,8 +45,8 @@ export async function POST(request: Request, { params }: RouteContext) {
       gcodeAttachment: { fileName, size: bytes.byteLength },
       updatedAt: new Date().toISOString(),
     };
-    await saveOrder(updated);
-    return NextResponse.json({ order: updated }, { headers: { "Cache-Control": "private, no-store" } });
+    const saved = await saveOrder(updated);
+    return NextResponse.json({ order: saved }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof ApiError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -96,7 +96,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
   const updatedOrder = { ...order };
   delete updatedOrder.gcodeAttachment;
   const updated = { ...updatedOrder, updatedAt: new Date().toISOString() };
-  await saveOrder(updated);
+  const saved = await saveOrder(updated);
   await orderGcodeFiles.remove(id);
-  return NextResponse.json({ order: updated }, { headers: { "Cache-Control": "private, no-store" } });
+  return NextResponse.json({ order: saved }, { headers: { "Cache-Control": "private, no-store" } });
 }

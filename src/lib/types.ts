@@ -87,12 +87,46 @@ export interface ParsedPrint {
 
 export type OrderStatus = "open" | "in_progress" | "ready" | "completed" | "cancelled";
 export type OrderPriority = "low" | "normal" | "high";
+export interface Customer {
+  id: string;
+  name: string;
+  company: string;
+  email: string;
+  phone: string;
+  billingAddress: string;
+  shippingAddress: string;
+  notes: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export type PaymentStatus = "unpaid" | "partial" | "paid" | "refunded";
+export type ShippingStatus = "not_shipped" | "shipped" | "delivered" | "pickup";
+export type OrderHistoryEventType = "created" | "updated" | "completed" | "payment_updated" | "shipping_updated";
+
+export interface OrderHistoryEntry {
+  type: OrderHistoryEventType;
+  at: string;
+  shippingStatus?: ShippingStatus;
+}
 
 export interface PrintOrder {
   id: string;
   customerName: string;
+  customerId?: string | null;
+  customerSnapshot?: Customer;
+  paymentStatus?: PaymentStatus;
+  paymentMethod?: string;
+  paidAmount?: number;
+  paymentCurrency?: Currency;
+  shippingStatus?: ShippingStatus;
+  deliveredAt?: string | null;
+  shippingMethod?: string;
+  trackingNumber?: string;
   status: OrderStatus;
   priority?: OrderPriority;
+  printerId?: string | null;
+  queuePosition?: number;
   gcodeAttachment?: { fileName: string; size: number };
   calculation?: OrderCalculationSnapshot;
   dueDate: string | null;
@@ -100,6 +134,25 @@ export interface PrintOrder {
   items: { printId: string; quantity: number }[];
   createdAt: string;
   updatedAt: string;
+  history?: OrderHistoryEntry[];
+}
+
+export type MaterialBookingStatus = "pending" | "confirmed" | "uncertain" | "rejected";
+export type MaterialBookingKind = "consumption" | "reversal";
+
+export interface MaterialBooking {
+  id: string;
+  printId: string;
+  provider: "spoolman" | "filaman";
+  sourceUrl: string;
+  spoolId: number;
+  spoolName: string;
+  grams: number;
+  kind: MaterialBookingKind;
+  status: MaterialBookingStatus;
+  relatedBookingId?: string;
+  note?: string;
+  createdAt: string;
 }
 
 export interface Material {
@@ -113,9 +166,22 @@ export interface Material {
 /** Purchased accessory such as screws, nuts, magnets, or glue. */
 export interface AccessoryMaterial {
   id: string;
+  numericId?: number;
   name: string;
   pricePerPack: number;
   unitsPerPack: number;
+  stockQuantity: number;
+}
+
+export interface AccessoryStockMovement {
+  id: string;
+  accessoryId: string;
+  accessoryName: string;
+  quantity: number;
+  kind: "receipt" | "adjustment" | "consumption";
+  reference: string;
+  referenceKey: string | null;
+  createdAt: string;
 }
 
 export interface PrinterProfile {
@@ -191,6 +257,10 @@ export interface DocumentNumberingSettings {
 }
 
 export interface AppSettings {
+  nextAccessoryNumber: number;
+  features: AppFeatures;
+  labelTemplates: import("./labelTemplates").LabelTemplate[];
+  productTypes: ProductType[];
   materials: Material[];
   accessoryMaterials: AccessoryMaterial[];
   invoiceTemplates: InvoiceTemplate[];
@@ -206,6 +276,32 @@ export interface AppSettings {
   };
   /** True once the user has gone through Settings at least once after a fresh install. */
   setupCompleted: boolean;
+}
+
+export interface AppFeatures {
+  customers: boolean;
+  products: boolean;
+  orders: boolean;
+  invoices: boolean;
+  quotes: boolean;
+}
+
+export interface ProductType {
+  id: string;
+  name: string;
+  prefix: string;
+  digits: number;
+  nextNumber: number;
+  fileName: string;
+  linkedPrintId: string | null;
+  imageMode: "print" | "custom" | "none";
+  imageBase64: string | null;
+  serialNumbers: ProductSerial[];
+}
+
+export interface ProductSerial {
+  serialNumber: string;
+  orderId: string | null;
 }
 
 export type Language = string;
@@ -231,6 +327,8 @@ export interface GeneralSettings {
   enable3dPreview: boolean;
   retainOriginalArchives: boolean;
   previewComputePercent: number;
+  fetchGithubChangelog: boolean;
+  checkGithubUpdates: boolean;
   companyName: string;
   companyAddress: string;
   companyEmail: string;
@@ -249,6 +347,7 @@ export interface ExtraCostItem {
   name: string;
   cost: number;
   quantity: number;
+  accessoryId?: string;
 }
 
 export interface CostResult {

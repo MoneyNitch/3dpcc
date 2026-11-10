@@ -1,5 +1,73 @@
 # Changelog
 
+## v0.9.0 — Product catalog, order planning and labels
+
+### Changed
+- The order overview has clickable status summaries, separate overview/planning
+  views, grouped filters and compact cards with saved prices and payment status.
+- Accessory management moves from Settings to its own navigation page with search,
+  stock filters, article cards, separate confirmed stock changes and per-item history.
+- GitHub preference switches save only their two supported fields, so toggling
+  them is no longer rejected because of unrelated general settings.
+- Settings render the changelog as formatted Markdown, with a separate card for
+  each release and Unreleased section. Embedded HTML and automatic image loading
+  are disabled; links open only on explicit interaction.
+- Manual print creation has a refreshed responsive card layout with grouped print
+  details, individual filament cards, a total-weight badge and a clearer image input.
+- Product details use a clearer responsive overview, a direct serial-number
+  generation action, collapsible appearance settings and a searchable serial list.
+- Order deletion conflicts caused by assigned product serial numbers show a
+  translated explanation and tell users to unassign the serial numbers first.
+
+### Added
+- Settings can independently enable or disable Customers, Products, Orders,
+  Invoices and Quotes. Disabled sections are hidden from navigation and direct
+  page access, while their saved data is preserved.
+- Order details can generate invoices from saved order pricing and contact snapshots,
+  using existing templates with preview, HTML download and printing. Automatic
+  numbers are reserved atomically; outdated/unsaved calculations cannot be invoiced.
+- Accessories receive permanent sequential numeric IDs, including existing articles.
+  The label designer supports `{{numericId}}` for text, QR and Code 128;
+  deleted numbers are not reused and numbering is included in backups.
+- A local accessory label designer supports saved millimeter-sized templates,
+  draggable text, QR and Code 128 elements, name/ID variables, custom code content
+  and single-label printing. Templates are included in settings migration, backups
+  and database transfers; old Settings saves do not overwrite the separate catalog.
+- Customer management includes contacts, billing/shipping addresses, internal
+  notes, search, archiving/reactivation and related orders. Order customer
+  assignment retains a contact snapshot. Customers are included in all database
+  backends, database transfers and encrypted backups.
+- Order details use separated article, workflow, contact and activity cards.
+  Payment status/method/amount and shipping status/method/tracking number can be
+  recorded manually without automatic payment processing or stock reservation.
+- Customer management, API-key management and API documentation recommend HTTPS
+  when opened over HTTP. Reverse-proxy TLS configuration is documented.
+- The user dropdown shows the installed version at the bottom and any known newer
+  stable release, with a Settings link when permitted. It reuses the update cache
+  and Settings checks without making additional GitHub requests.
+- Settings display the bundled changelog or the latest GitHub default-branch
+  changelog and notify about newer stable GitHub releases. Two independently
+  persisted switches control the online features (enabled by default). Disabled
+  features perform no GitHub requests; requests have bounded timeouts and caching.
+- Role cards in user management expose a read-only list of granted permissions,
+  including the predefined Viewer, Admin and Superadmin roles.
+- A bulk stock-update button below quote creation deducts all selected filament
+  spools and accessories for the print after one confirmation. Existing bookings
+  are not repeated; individual results make partial failures explicit.
+- Accessory catalog entries track pack price, units per pack and stock quantity.
+  Stock receipts and corrections are recorded in a persistent movement history;
+  print and order calculators can explicitly deduct saved accessory usage after
+  confirmation. Duplicate deductions and insufficient stock are blocked, and
+  inventory history is included in backups.
+- Order detail history records creation, saved changes and completion timestamps.
+- External spool consumption is recorded in a persistent journal included in backups.
+  Duplicate bookings for the same print and spool are blocked across reloads;
+  uncertain results remain blocked until the external inventory is checked.
+- Confirmed reversals can be recorded in the journal. They are internal-only and do
+  not modify stock in Spoolman or FilaMan.
+- Orders can be assigned to configured printers. The print schedule estimates each
+  queue's occupancy from print duration × quantity and supports manual queue order.
+
 ## v0.8.0 — User management, customer orders and independent order pricing
 
 ### Added

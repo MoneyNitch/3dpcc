@@ -58,6 +58,11 @@ tower and total) and multi-color information, and calculates print costs.
   overdue, today, future and undated orders. Resetting filters restores the default
   view without changing the selected sort order.
 - Open an order to view its details, G-code attachment and independent calculation.
+  The order history records creation, every saved change and completion times.
+  Assign active orders to configured printers in the order form. The print schedule
+  shows each printer's queue and expected occupancy from saved print times multiplied
+  by order quantities; unknown print times are called out instead of guessed.
+  Queues initially sort by due date and then priority and can be manually reordered.
   Edit per-unit material, accessory, electricity and machine costs for each position;
   position quantities come from the order. Labor, packaging and shipping are charged
   once per order. Margin, an explicit order discount and tax apply to the total.
@@ -71,8 +76,37 @@ tower and total) and multi-color information, and calculates print costs.
   completed-order statistics use them, with the original calculation fallback for
   older orders without a snapshot. Statistics show different currencies separately
   rather than adding or converting their values.
+- **Products** stores a 3MF file per product type. Configure a unique prefix and
+  zero-padded sequence length for each type, then generate up to 1000 serial
+  numbers at a time and download the batch as CSV. The next number is advanced
+  atomically so concurrent requests cannot issue the same serial number.
+  Link a product type to a saved print and use that print's thumbnail, upload a
+  separate product photo, or leave the product without a photo. Product files,
+  photos and numbering settings are included in encrypted application backups.
+  Generated serials are listed and can be assigned to an order containing the
+  linked print, up to the ordered quantity. The product and order views show the
+  customer, order date and actual delivery date (recorded when the order is marked
+  delivered). Orders cannot be deleted or have their matching quantities reduced
+  until their serial assignments are removed.
 - Spoolman and FilaMan System connections with per-filament spool
   selection in the cost calculator
+- **Accessory inventory** on its own **Accessory database** page (between Customers
+  and the user menu) stores pack prices,
+  units per pack and stock quantities. Record receipts and signed corrections
+  with a movement history. Select catalog accessories in a print's additional
+  costs, then explicitly confirm stock deduction from the calculator; order
+  details can deduct the selected accessories for all saved print positions.
+  Repeated deductions and deductions exceeding available stock are blocked.
+  Inventory and its history are included in application backups.
+  Search by name/ID, filter in-stock/out-of-stock articles, and view item-specific
+  movement history. Item edits are saved immediately; stock changes have a separate
+  confirmation step. Article creation/editing and stock changes open in a modal;
+  cancel or Escape closes it without saving. Corrections use a signed delta, not a
+  target stock quantity.
+  Use **Update stock for this print** below quote creation to deduct all selected
+  spools and accessories with one confirmation. Filament usage follows the current
+  plate selection and print quantity. Results are shown separately because external
+  spool services and local accessory inventory cannot share an atomic transaction.
 - Interactive 3D preview: embedded model meshes when available, otherwise a
   complete G-code toolpath preview (including XY arcs), rendered using WebGL2
   as solid filament strands with slicer-provided widths and layer heights.
@@ -205,8 +239,10 @@ unknown or insufficient stock is rejected. FilaMan requires the additional
 
 There are no automatic retries. If a request times out or its result is uncertain,
 check the external inventory before trying again: the booking may already have
-succeeded. This is an explicit consumption booking, not an automatic print tracker;
-booking again after reloading the page deducts material again.
+succeeded. Each attempt is kept in the database-backed booking journal and included
+in backups. The same print and spool cannot be booked again accidentally after a
+reload; uncertain outcomes stay blocked until checked. A confirmed reversal adds an
+internal journal entry only and does not change the external spool stock.
 
 The integration uses Spoolman's `/api/v1/spool` list and FilaMan System's
 paginated `/api/v1/spools` API. Results are limited to 10,000 spools per service,
@@ -299,6 +335,37 @@ created automatically when needed. These files contain prints, settings and
 invoice data and are intentionally excluded from the repository by
 `.gitignore`.
 
+### Changelog, update checks and offline operation
+
+**Settings → Changelog & updates** shows the bundled `CHANGELOG.md` and can load
+the current file from GitHub's default branch. Stable releases (not prereleases
+or branch commits) are compared numerically with the installed package version;
+a newer release shows a notification in Settings. No update is installed automatically.
+The user dropdown also displays the installed version at the bottom and any cached
+new-release notification. Settings checks update this indicator immediately;
+opening the dropdown does not trigger GitHub requests. Users with Settings access
+can open the update details from the notification.
+
+Both **Load current changelog from GitHub** and **Check for updates on GitHub**
+are enabled by default and saved immediately, independently, for the entire
+installation. Turn both off for **zero GitHub traffic from these two features**;
+the bundled changelog remains readable. Markdown is formatted with a separate card
+for each level-two release heading, including Unreleased. Raw HTML is ignored and
+images are displayed as text to prevent automatic external requests; HTTP(S) links
+only contact their destination when explicitly opened. There are no timers or background checks.
+When enabled, opening Settings makes server-side requests to `api.github.com`,
+with a one-hour success cache, a five-minute error cache, a 10-second timeout
+and a 512 KiB response limit. **Refresh from GitHub now** bypasses the cache.
+No print, customer or credential data is sent; GitHub sees the server's public
+IP address and the application's generic User-Agent. Release links contact
+GitHub only when explicitly opened. Errors are visible, with local changelog
+fallback rather than a claim that the installation is up to date.
+
+These switches are not a global network firewall: filament integrations, Next.js
+telemetry and other system services are independent. For a fully isolated
+installation, also disable external integrations, set `NEXT_TELEMETRY_DISABLED=1`
+and enforce outbound blocking at the OS/container/network level.
+
 ### Login and roles
 
 Login is **enabled by default**. On the first login use **admin / admin**.
@@ -314,6 +381,8 @@ disable or delete accounts, reset passwords, define named custom roles and
 issue/revoke user-bound API keys. New/reset passwords must be changed at the
 next login. Click your username in the navigation to open the user menu with
 **Change password** and **Sign out**.
+Each role card offers **View permissions**, including the predefined Viewer,
+Admin and Superadmin roles. The list is read-only; built-in roles remain immutable.
 
 Under **Password requirements**, superadmins can set the minimum length
 (4–128 characters) and independently require uppercase letters, lowercase
@@ -383,12 +452,138 @@ AUTH_ORIGIN=https://3dpcc.example.com
 AUTH_COOKIE_SECURE=true
 ```
 
+These variables **do not enable TLS by themselves**. Enable an HTTPS listener
+and a trusted certificate on your existing reverse proxy, redirect HTTP to HTTPS,
+and restart 3D-PCC with the variables above (`.env.local` for npm, `.env` for
+Compose). Keep the internal application port reachable only by the proxy.
+The browser must trust the certificate, including on local networks.
+
+Example nginx configuration (replace the hostname, certificate paths and upstream
+address with your installation values):
+
+```nginx
+server {
+    listen 80;
+    server_name 3dpcc.example.com;
+    return 301 https://3dpcc.example.com$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name 3dpcc.example.com;
+    ssl_certificate /etc/nginx/certs/3dpcc.crt;
+    ssl_certificate_key /etc/nginx/certs/3dpcc.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 512m;
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+}
+```
+
+Validate the proxy configuration before reloading it. On Linux/nginx, use
+`sudo nginx -t` and then `sudo systemctl reload nginx`. For a proxy on a different
+host/container, replace `127.0.0.1` with the private application address and
+restrict that port with a firewall or private Docker network. Verify the HTTPS
+URL, successful sign-in, customer saving and API access before enabling redirects.
+Do not set secure cookies while continuing to use the HTTP browser URL.
+
+Customer management, API-key management and the API documentation show an
+informational HTTPS recommendation when the **browser** uses HTTP. Detection uses
+the browser protocol, not untrusted forwarding headers, so a TLS-terminating proxy
+with an HTTP upstream does not cause a false warning.
+
 Without `AUTH_ORIGIN`, mutation requests must originate from the request
 host/protocol. Include the port if non-standard. HTTPS is required over
 untrusted networks. Docker Compose forwards all three auth variables from
 its `.env`. `AUTH_ENABLED` accepts only `true` or `false`; invalid values
 fail closed. Run `npm run test:auth` for authentication and route integration
 tests, and `npm run test:api` for legacy API regression tests.
+
+### Customers and order workflow
+
+**Customers** provides creation, editing, search by name/company/email/phone,
+archiving/reactivation, billing/shipping addresses, internal notes and links to
+related orders. The existing `documents.read` / `documents.write` permissions
+control access. Customer records are stored in the selected database and included
+in encrypted backups and database transfers.
+Customer creation and editing open in a scrollable modal. Cancel, the close button
+or Escape closes it without saving; save errors remain visible inside the modal.
+
+Choose a directory customer in the order form or retain the legacy manual name.
+Archived customers cannot be linked to new orders; existing links are preserved.
+Contact details are copied into an order snapshot on assignment and do not change
+when the directory entry is subsequently edited. Reassigning another customer
+creates a new contact snapshot. Customers are archived rather than deleted, so
+existing orders remain intact.
+
+Order details use separated item, payment/shipping, customer contact, activity and
+calculation cards. Payment status/method/recorded amount and shipping
+status/method/tracking number are manually editable and persisted. These do not
+process payments, track parcels automatically or reserve inventory. Existing
+orders default to unpaid and not shipped. Item amounts are explicitly **base
+costs**, while the order total includes order-wide labor, packaging, shipping,
+margin, discount and tax. Unsaved/outdated calculations are marked as previews.
+The original calculation editor and G-code download remain available.
+
+Use **Create invoice** in the order detail header after saving the current order
+calculation. The dialog uses the existing invoice templates, the order's contact
+snapshot/billing address, saved prices and saved currency, with editable customer
+details, document number, invoice/due dates and discount visibility. All print
+positions and quantities are included; once-per-order labor, packaging and shipping,
+margin, discount and tax are distributed across position prices rather than added
+again. Position totals sum to the rounded invoice total, including very small prices.
+Preview does not consume a number. HTML download or printing reserves an automatic
+invoice number atomically; repeated exports of the unchanged document in the same
+dialog reuse it. Manually entered numbers do not advance the counter and must be
+managed by the user. A concurrent numbering/order change is shown as a conflict.
+This follows the existing print export: it generates an HTML document, not a saved
+invoice ledger entry, and does not mark the order paid or deduct inventory.
+Creating invoices requires `documents.write`; reading an order alone is insufficient.
+
+The order overview now separates **Order overview** and **Print schedule**.
+Clickable summary cards filter active, in-production, ready and overdue orders.
+The existing default still hides completed orders; the new active filter also
+excludes cancelled orders. Compact order cards show quantities, payment status
+and the saved calculation price/currency, explicitly marking outdated snapshots.
+Notes are expandable; sorting, search, G-code management, queue reordering and
+printer visibility preferences remain available.
+
+### Accessory label designer
+
+Open **Accessory database → Label designer** or **Print label** on an item.
+Templates are shared across accessory items and saved in the selected database,
+including encrypted backups and database transfers. Template editing requires
+`settings.write`; catalog viewing and label preview/printing require `settings.read`.
+The former `Settings → Accessories` tab has moved; `/settings?tab=accessories`
+redirects to `/accessories`. Regular Settings saves preserve the separately managed
+catalog and templates, including when another tab contains older Settings data.
+
+Set label width/height in millimeters (15–300 mm), add text, QR or Code 128 elements,
+and drag them or edit their X/Y positions and sizes. Arrow keys move a focused
+element by 1 mm. Text can use `{{name}}` and `{{id}}`; codes default to the item ID
+and may also use custom text. **Use numeric ID** sets the selected element's content
+to `{{numericId}}`. Every accessory receives a permanently saved sequential number;
+existing articles are numbered automatically. Numbers remain unchanged when editing,
+are not reused after deletion, and are included in backups/database transfers.
+The internal `{{id}}` remains unchanged for existing references. Numeric IDs work
+as text, QR and barcode and can also be searched in the catalog.
+QR and barcodes can coexist. Code 128 supports
+1–100 printable ASCII characters; use QR for other characters. Rendering is local
+and does not send label content to external services.
+
+Preview and single-label printing use the same SVG and physical dimensions.
+Choose the matching paper size, 100% scale, no margins and no headers/footers
+in the browser/printer dialog. Labels must fit the printer's printable area.
+The designer rejects overflowing text/elements, overlapping code areas and codes
+too dense for their available size. QR has a four-module quiet zone; barcodes
+include quiet zones and a minimum narrow-bar width check. Actual scanner readability
+also depends on printer resolution and media; verify a test label on your printer.
 
 ### Installation scripts
 

@@ -277,6 +277,10 @@ test("all settings collections support CRUD and cannot invalidate the default pr
   assert.equal(updated.general.language, before.general.language);
   assert.equal(updated.numbering.invoice.prefix, "INV");
   assert.deepEqual(updated.numbering.quote, before.numbering.quote);
+  const featureUpdate = await f.send("/settings", "PATCH", { features: { customers: false } });
+  assert.equal(featureUpdate.status, 200);
+  assert.equal((await featureUpdate.json()).settings.features.customers, false);
+  assert.equal((await f.dependencies.store.getSettings()).features.orders, true);
   assert.equal((await f.send("/settings", "PATCH", {})).status, 400);
   assert.equal((await f.send("/settings", "PATCH", { defaultPrinterId: "missing" })).status, 400);
   assert.equal((await f.send("/settings", "PATCH", { general: { language: "missing" } })).status, 400);

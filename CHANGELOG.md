@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.9.0 — Product catalog, order planning and labels
 
 ### Changed
 - The order overview has clickable status summaries, separate overview/planning
@@ -16,8 +16,13 @@
   details, individual filament cards, a total-weight badge and a clearer image input.
 - Product details use a clearer responsive overview, a direct serial-number
   generation action, collapsible appearance settings and a searchable serial list.
+- Order deletion conflicts caused by assigned product serial numbers show a
+  translated explanation and tell users to unassign the serial numbers first.
 
 ### Added
+- Settings can independently enable or disable Customers, Products, Orders,
+  Invoices and Quotes. Disabled sections are hidden from navigation and direct
+  page access, while their saved data is preserved.
 - Order details can generate invoices from saved order pricing and contact snapshots,
   using existing templates with preview, HTML download and printing. Automatic
   numbers are reserved atomically; outdated/unsaved calculations cannot be invoiced.

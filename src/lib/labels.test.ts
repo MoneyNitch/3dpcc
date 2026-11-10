@@ -8,10 +8,11 @@ import { settingsSchema } from "./api/schemas";
 const item = { name: "Example clips", id: "12345678-1234-4234-8234-123456789abc", numericId: 42 };
 
 test("template migration and variable substitution preserve old settings", () => {
-  const { labelTemplates, ...legacy } = defaultSettings;
-  assert.deepEqual(labelTemplates, []);
+  const legacy = { ...defaultSettings, labelTemplates: undefined, features: undefined };
   assert.deepEqual(migrateSettings(legacy).labelTemplates, []);
+  assert.deepEqual(migrateSettings(legacy).features, defaultSettings.features);
   assert.deepEqual(settingsSchema.parse(legacy).labelTemplates, []);
+  assert.deepEqual(settingsSchema.parse(legacy).features, defaultSettings.features);
   assert.deepEqual(settingsSchema.parse(legacy).productTypes, []);
   assert.equal(labelContent("{{name}} / {{id}} / custom", item), `${item.name} / ${item.id} / custom`);
   assert.equal(labelContent("{{numericId}}", item), "42");

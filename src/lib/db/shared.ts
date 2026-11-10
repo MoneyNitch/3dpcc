@@ -121,6 +121,13 @@ export function recordOrderDeliveryDate(order: PrintOrder, existing?: PrintOrder
 
 export const defaultSettings: AppSettings = {
   nextAccessoryNumber: 1,
+  features: {
+    customers: true,
+    products: true,
+    orders: true,
+    invoices: true,
+    quotes: true,
+  },
   labelTemplates: [],
   productTypes: [],
   materials: [
@@ -208,6 +215,16 @@ export const defaultSettings: AppSettings = {
 export function migrateSettings(raw: unknown): AppSettings {
   const data = raw as AppSettings & { printer?: AppSettings["printers"][number] };
   let result = data;
+  result = {
+    ...result,
+    features: {
+      customers: typeof result.features?.customers === "boolean" ? result.features.customers : defaultSettings.features.customers,
+      products: typeof result.features?.products === "boolean" ? result.features.products : defaultSettings.features.products,
+      orders: typeof result.features?.orders === "boolean" ? result.features.orders : defaultSettings.features.orders,
+      invoices: typeof result.features?.invoices === "boolean" ? result.features.invoices : defaultSettings.features.invoices,
+      quotes: typeof result.features?.quotes === "boolean" ? result.features.quotes : defaultSettings.features.quotes,
+    },
+  };
   if (!result.labelTemplates) result = { ...result, labelTemplates: [] };
   if (!result.productTypes) result = { ...result, productTypes: [] };
   else {

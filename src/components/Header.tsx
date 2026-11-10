@@ -23,11 +23,11 @@ export async function Header() {
         <Link href="/" className="font-semibold text-slate-900 dark:text-slate-100">3D-PCC</Link>
         <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-600 dark:text-slate-300">
           {can("prints.read") && <Link href="/">{t("nav.prints")}</Link>}
-          {can("prints.read") && <Link href="/products">{t("nav.products")}</Link>}
-          {can("documents.read") && <Link href="/invoices">{t("nav.invoices")}</Link>}
-          {can("documents.read") && <Link href="/quotes">{t("nav.quotes")}</Link>}
-          {can("documents.read") && <Link href="/orders">{t("nav.orders")}</Link>}
-          {can("documents.read") && <Link href="/customers">{t("customers.title")}</Link>}
+          {settings.features.products && can("prints.read") && <Link href="/products">{t("nav.products")}</Link>}
+          {settings.features.invoices && can("documents.read") && <Link href="/invoices">{t("nav.invoices")}</Link>}
+          {settings.features.quotes && can("documents.read") && <Link href="/quotes">{t("nav.quotes")}</Link>}
+          {settings.features.orders && can("documents.read") && <Link href="/orders">{t("nav.orders")}</Link>}
+          {settings.features.customers && can("documents.read") && <Link href="/customers">{t("customers.title")}</Link>}
           {can("settings.read") && <Link href="/accessories">{t("settings.accessoryMaterials")}</Link>}
           {enabled && user ? (
             <UserMenu

@@ -72,6 +72,7 @@ export function OrderManager({
   prints,
   printers,
   canEdit,
+  canManageCustomers,
   initialEditingOrderId,
   initialToday,
   customers,
@@ -80,6 +81,7 @@ export function OrderManager({
   prints: PrintOption[];
   printers: PrinterOption[];
   canEdit: boolean;
+  canManageCustomers: boolean;
   initialEditingOrderId?: string;
   initialToday: string;
   customers: Pick<Customer, "id" | "name" | "company" | "archived">[];
@@ -250,7 +252,7 @@ export function OrderManager({
     try {
       const response = await fetch(`/api/orders/${id}`, { method: "DELETE" });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? t("orders.deleteFailed"));
+      if (!response.ok) throw new Error(t(body.error ?? "orders.deleteFailed"));
       setOrders((current) => current.filter((order) => order.id !== id));
       setMessage({ type: "success", text: t("orders.deleted") });
     } catch (error) {
@@ -404,7 +406,7 @@ export function OrderManager({
                   <option key={customer.id} value={customer.id}>{customer.name}{customer.company ? ` · ${customer.company}` : ""}{customer.archived ? ` (${t("customers.archived")})` : ""}</option>
                 ))}
               </select>
-              <Link href="/customers" className="mt-1 inline-block text-xs text-orange-700 hover:underline dark:text-orange-300">{t("customers.manage")}</Link>
+              {canManageCustomers && <Link href="/customers" className="mt-1 inline-block text-xs text-orange-700 hover:underline dark:text-orange-300">{t("customers.manage")}</Link>}
             </label>
             <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
               {t("orders.customer")}

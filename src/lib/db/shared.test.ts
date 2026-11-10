@@ -6,6 +6,24 @@ test("enables 3D previews by default", () => {
   assert.equal(defaultSettings.general.enable3dPreview, true);
 });
 
+test("module features default to enabled and legacy settings remain enabled", () => {
+  assert.deepEqual(defaultSettings.features, {
+    customers: true,
+    products: true,
+    orders: true,
+    invoices: true,
+    quotes: true,
+  });
+  assert.deepEqual(migrateSettings({ ...defaultSettings, features: undefined }).features, defaultSettings.features);
+  const disabled = migrateSettings({
+    ...defaultSettings,
+    features: { ...defaultSettings.features, customers: false, quotes: false },
+  });
+  assert.equal(disabled.features.customers, false);
+  assert.equal(disabled.features.quotes, false);
+  assert.equal(disabled.features.orders, true);
+});
+
 test("records actual delivery once when an order is marked delivered", () => {
   const order = {
     id: "12345678-1234-4234-8234-123456789abc",

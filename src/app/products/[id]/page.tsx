@@ -4,6 +4,7 @@ import { ProductsManager } from "@/components/ProductsManager";
 import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getSettings, listOrders, listPrints } from "@/lib/db";
+import { requireFeatureEnabled } from "@/lib/setupGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +14,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   if (!z.uuid().safeParse(id).success) notFound();
 
   const canReadOrders = hasPermission(user, "documents.read", authEnabled());
-  const [settings, prints, orders] = await Promise.all([
-    getSettings(),
+  const settings = await getSettings();
+  requireFeatureEnabled(settings, "products");
+  const [prints, orders] = await Promise.all([
     listPrints(),
-    canReadOrders ? listOrders() : Promise.resolve([]),
+    settings.features.orders && canReadOrders ? listOrders() : Promise.resolve([]),
   ]);
   const product = settings.productTypes.find((item) => item.id === id);
   if (!product) notFound();
@@ -38,7 +40,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           deliveredAt: order.deliveredAt ?? null,
           items: order.items,
         }))}
-        canAssignOrders={canReadOrders && hasPermission(user, "prints.write", authEnabled()) &&
+        canAssignOrders={settings.features.orders && canReadOrders && hasPermission(user, "prints.write", authEnabled()) &&
           hasPermission(user, "documents.write", authEnabled())}
         canEdit={hasPermission(user, "prints.write", authEnabled())}
         detailView

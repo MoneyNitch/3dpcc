@@ -273,6 +273,14 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
     setSaved(false);
   }
 
+  function updateFeature(feature: keyof AppSettings["features"], enabled: boolean) {
+    setSettings((current) => ({
+      ...current,
+      features: { ...current.features, [feature]: enabled },
+    }));
+    setSaved(false);
+  }
+
   async function uploadLanguagePack(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -482,6 +490,29 @@ export function SettingsForm({ initialSettings, databaseSettings, filamentSettin
               ))}
             </select>
           </Field>
+        </div>
+        <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+          <h3 className="font-medium text-slate-800 dark:text-slate-100">{t("settings.featuresTitle")}</h3>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.featuresHelp")}</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {([
+              ["customers", "customers.title"],
+              ["products", "nav.products"],
+              ["orders", "nav.orders"],
+              ["invoices", "nav.invoices"],
+              ["quotes", "nav.quotes"],
+            ] as const).map(([feature, label]) => (
+              <label key={feature} className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={settings.features[feature]}
+                  onChange={(event) => updateFeature(feature, event.target.checked)}
+                  className="h-4 w-4 accent-orange-500"
+                />
+                <span>{t(label)}</span>
+              </label>
+            ))}
+          </div>
         </div>
         <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
           <h3 className="font-medium text-slate-800 dark:text-slate-100">{t("settings.invoiceSender")}</h3>

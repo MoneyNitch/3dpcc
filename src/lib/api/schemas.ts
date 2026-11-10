@@ -73,8 +73,16 @@ const numberingSchema = z.strictObject({
   prefix: z.string().min(1).max(50), nextNumber: z.number().int().positive().max(1_000_000_000),
   digits: z.number().int().min(1).max(12),
 });
+const featuresSchema = z.strictObject({
+  customers: z.boolean(),
+  products: z.boolean(),
+  orders: z.boolean(),
+  invoices: z.boolean(),
+  quotes: z.boolean(),
+});
 export const settingsSchema = z.strictObject({
   nextAccessoryNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(1),
+  features: featuresSchema.default({ customers: true, products: true, orders: true, invoices: true, quotes: true }),
   labelTemplates: labelTemplatesSchema.default([]),
   productTypes: z.array(productTypeSchema).max(1000).default([]).refine(uniqueIds, "Product type IDs must be unique.")
     .refine((items) => new Set(items.map((item) => item.prefix.toLowerCase())).size === items.length, "Product prefixes must be unique."),
@@ -112,6 +120,7 @@ export const settingsSchema = z.strictObject({
   path: ["general", "language"], message: "Selected language must be installed.",
 });
 export const settingsPatchSchema = z.strictObject(settingsSchema.shape).partial().extend({
+  features: featuresSchema.partial().optional(),
   labelTemplates: labelTemplatesSchema.optional(),
   productTypes: settingsSchema.shape.productTypes.unwrap().optional(),
   nextAccessoryNumber: settingsSchema.shape.nextAccessoryNumber.unwrap().optional(),

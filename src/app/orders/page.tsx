@@ -3,7 +3,7 @@ import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getSettings, listCustomers, listOrders, listPrints } from "@/lib/db";
 import { translate } from "@/lib/i18n";
-import { requireSetupComplete } from "@/lib/setupGuard";
+import { requireFeatureEnabled, requireSetupComplete } from "@/lib/setupGuard";
 import { localDateKey } from "@/lib/orderFilters";
 
 export const dynamic = "force-dynamic";
@@ -12,8 +12,10 @@ export default async function OrdersPage({ searchParams }: {
   searchParams: Promise<{ edit?: string }>;
 }) {
   const user = await requirePage("documents.read");
-  const [settings, orders, prints, customers] = await Promise.all([getSettings(), listOrders(), listPrints(), listCustomers()]);
+  const settings = await getSettings();
+  requireFeatureEnabled(settings, "orders");
   requireSetupComplete(settings);
+  const [orders, prints, customers] = await Promise.all([listOrders(), listPrints(), listCustomers()]);
   const lang = settings.general.language;
   const { edit } = await searchParams;
   const t = (key: string) => translate(lang, key, undefined, settings.customLanguagePacks);
@@ -38,6 +40,7 @@ export default async function OrdersPage({ searchParams }: {
         }))}
         printers={settings.printers.map(({ id, name }) => ({ id, name }))}
         canEdit={hasPermission(user, "documents.write", authEnabled())}
+        canManageCustomers={settings.features.customers}
       />
     </div>
   );

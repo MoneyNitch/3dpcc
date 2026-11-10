@@ -3,16 +3,18 @@ import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getSettings, listOrders, listPrints } from "@/lib/db";
 import { translate } from "@/lib/i18n";
+import { requireFeatureEnabled } from "@/lib/setupGuard";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
   const user = await requirePage("prints.read");
   const canReadOrders = hasPermission(user, "documents.read", authEnabled());
-  const [settings, prints, orders] = await Promise.all([
-    getSettings(),
+  const settings = await getSettings();
+  requireFeatureEnabled(settings, "products");
+  const [prints, orders] = await Promise.all([
     listPrints(),
-    canReadOrders ? listOrders() : Promise.resolve([]),
+    settings.features.orders && canReadOrders ? listOrders() : Promise.resolve([]),
   ]);
   const linkedPrintIds = new Set(settings.productTypes.flatMap((product) =>
     product.linkedPrintId ? [product.linkedPrintId] : []));
@@ -39,7 +41,7 @@ export default async function ProductsPage() {
           deliveredAt: order.deliveredAt ?? null,
           items: order.items,
         }))}
-        canAssignOrders={canReadOrders && hasPermission(user, "prints.write", authEnabled()) &&
+        canAssignOrders={settings.features.orders && canReadOrders && hasPermission(user, "prints.write", authEnabled()) &&
           hasPermission(user, "documents.write", authEnabled())}
         canEdit={hasPermission(user, "prints.write", authEnabled())}
       />

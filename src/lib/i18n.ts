@@ -701,6 +701,11 @@ const strings: Record<string, Record<Language, string>> = {
   "settings.welcomeBody": { de: "Richte zuerst Materialien, Drucker und Kosten ein.", en: "Set up your materials, printer and costs first." },
   "settings.finishSetup": { de: "Einrichtung abschließen", en: "Finish setup" },
   "settings.general": { de: "Allgemein", en: "General" },
+  "settings.featuresTitle": { de: "Funktionen", en: "Features" },
+  "settings.featuresHelp": {
+    de: "Blende nicht benötigte Bereiche in der Navigation aus. Die gespeicherten Daten bleiben erhalten.",
+    en: "Hide unused sections from the navigation. Existing data will be preserved.",
+  },
   "settings.version": { de: "Version", en: "Version" },
   "settings.language": { de: "Sprache", en: "Language" },
   "settings.languagePacks": { de: "Sprachpakete", en: "Language packs" },

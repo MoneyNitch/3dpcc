@@ -3,14 +3,16 @@ import { authEnabled, requirePage } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getSettings, listCustomers, listOrders } from "@/lib/db";
 import { translate } from "@/lib/i18n";
-import { requireSetupComplete } from "@/lib/setupGuard";
+import { requireFeatureEnabled, requireSetupComplete } from "@/lib/setupGuard";
 
 export const dynamic = "force-dynamic";
 
 export default async function CustomersPage() {
   const user = await requirePage("documents.read");
-  const [settings, customers, orders] = await Promise.all([getSettings(), listCustomers(), listOrders()]);
+  const settings = await getSettings();
+  requireFeatureEnabled(settings, "customers");
   requireSetupComplete(settings);
+  const [customers, orders] = await Promise.all([listCustomers(), listOrders()]);
   const t = (key: string) => translate(settings.general.language, key, undefined, settings.customLanguagePacks);
   return <div className="flex flex-col gap-6">
     <div><h1 className="text-2xl font-semibold">{t("customers.title")}</h1>

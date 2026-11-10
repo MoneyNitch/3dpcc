@@ -376,7 +376,8 @@ export function createOperations(dependencies: ApiDependencies): Operation[] {
       return exclusiveSettings(async () => {
         const current = await store.getSettings();
         return json({ settings: await persistSettings({
-          ...current, ...body, general: { ...current.general, ...body.general }, costs: { ...current.costs, ...body.costs },
+          ...current, ...body, features: { ...current.features, ...body.features },
+          general: { ...current.general, ...body.general }, costs: { ...current.costs, ...body.costs },
           numbering: {
             invoice: { ...current.numbering.invoice, ...body.numbering?.invoice },
             quote: { ...current.numbering.quote, ...body.numbering?.quote },

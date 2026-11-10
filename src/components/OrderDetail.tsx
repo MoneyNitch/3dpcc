@@ -63,11 +63,13 @@ function DecimalInput({ value, max, className, onChange }: {
   );
 }
 
-export function OrderDetail({ initialOrder, initialSnapshot, canEdit, canManageSerials, hasAccessoryStockItems, invoiceTemplates, invoiceNumbering, productTypes, orderPrints, serialNumbers }: {
+export function OrderDetail({ initialOrder, initialSnapshot, canEdit, canManageSerials, canManageCustomers, invoicesEnabled, hasAccessoryStockItems, invoiceTemplates, invoiceNumbering, productTypes, orderPrints, serialNumbers }: {
   initialOrder: PrintOrder;
   initialSnapshot: OrderCalculationSnapshot;
   canEdit: boolean;
   canManageSerials: boolean;
+  canManageCustomers: boolean;
+  invoicesEnabled: boolean;
   hasAccessoryStockItems: boolean;
   invoiceTemplates: InvoiceTemplate[];
   invoiceNumbering: DocumentNumberingSettings;
@@ -287,13 +289,13 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit, canManageS
             <p className="mt-1 break-all font-mono text-xs text-slate-500">{t("orders.orderId")}: {order.id}</p>
           </div>
           {canEdit && <div className="flex flex-wrap gap-2">
-            <OrderInvoiceExport order={order} templates={invoiceTemplates} numbering={invoiceNumbering}
-              disabled={busy || dirty || outdated || !order.calculation} />
+            {invoicesEnabled && <OrderInvoiceExport order={order} templates={invoiceTemplates} numbering={invoiceNumbering}
+              disabled={busy || dirty || outdated || !order.calculation} />}
             <Link href={`/orders?edit=${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-600">{t("orders.edit")}</Link>
           </div>}
         </div>
-        {canEdit && (dirty || outdated || !order.calculation) && <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">{t("orders.invoice.saveCalculation")}</p>}
-        {canEdit && !invoiceTemplates.length && <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">{t("orders.invoice.noTemplate")}</p>}
+        {canEdit && invoicesEnabled && (dirty || outdated || !order.calculation) && <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">{t("orders.invoice.saveCalculation")}</p>}
+        {canEdit && invoicesEnabled && !invoiceTemplates.length && <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">{t("orders.invoice.noTemplate")}</p>}
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <label className="text-sm">{t("orders.status")}
             <select className={inputClass} value={order.status} disabled={!canEdit || busy}
@@ -556,7 +558,7 @@ export function OrderDetail({ initialOrder, initialSnapshot, canEdit, canManageS
           </div>)}
         </dl>}
         <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{t(order.customerSnapshot ? "customers.snapshotNote" : "customers.noLinkedCustomer")}</p>
-        {order.customerId && <Link href="/customers" className="mt-3 inline-block text-sm text-orange-700 hover:underline dark:text-orange-300">{t("customers.manage")}</Link>}
+        {canManageCustomers && order.customerId && <Link href="/customers" className="mt-3 inline-block text-sm text-orange-700 hover:underline dark:text-orange-300">{t("customers.manage")}</Link>}
       </section>
       </div>
       <section className={`${cardClass} min-w-0`} aria-labelledby="order-history-heading">

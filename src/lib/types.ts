@@ -258,6 +258,7 @@ export interface DocumentNumberingSettings {
 
 export interface AppSettings {
   nextAccessoryNumber: number;
+  features: AppFeatures;
   labelTemplates: import("./labelTemplates").LabelTemplate[];
   productTypes: ProductType[];
   materials: Material[];
@@ -275,6 +276,14 @@ export interface AppSettings {
   };
   /** True once the user has gone through Settings at least once after a fresh install. */
   setupCompleted: boolean;
+}
+
+export interface AppFeatures {
+  customers: boolean;
+  products: boolean;
+  orders: boolean;
+  invoices: boolean;
+  quotes: boolean;
 }
 
 export interface ProductType {

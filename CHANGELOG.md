@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.1 — Manual filament fix
+
+### Fixed
+- Adding filaments to manual prints now works over HTTP, including when editing
+  an existing manual print.
+
 ## v0.9.0 — Product catalog, order planning and labels
 
 ### Changed

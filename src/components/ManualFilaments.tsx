@@ -2,6 +2,7 @@
 
 import { useLocale } from "@/lib/locale";
 import { getIntlLocale } from "@/lib/i18n";
+import { randomUUID } from "@/lib/clientId";
 import type { Material } from "@/lib/types";
 
 export interface FilamentDraft {
@@ -40,6 +41,22 @@ export function ManualFilaments({ items, onChange, materials }: {
   const inputClass = "mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100";
   function update(filamentId: string, patch: Partial<FilamentDraft>) {
     onChange(items.map((item) => item.filamentId === filamentId ? { ...item, ...patch } : item));
+  }
+  function addFilament() {
+    const usedIds = new Set(items.map((item) => item.filamentId));
+    const baseId = randomUUID();
+    let id = baseId;
+    let suffix = 1;
+    while (usedIds.has(id)) id = `${baseId}-${suffix++}`;
+    onChange([...items, {
+      filamentId: id,
+      type: materials[0]?.type ?? "PLA",
+      color: materials[0]?.color ?? "#ffffff",
+      weight: "",
+      supportWeight: "",
+      towerWeight: "",
+      otherWeight: "",
+    }]);
   }
   return (
     <div className="space-y-3 sm:col-span-2">
@@ -85,7 +102,7 @@ export function ManualFilaments({ items, onChange, materials }: {
         </div>
       ))}
       <datalist id="manual-material-options">{[...new Set(materials.map((item) => item.type))].map((type) => <option key={type} value={type} />)}</datalist>
-      <button type="button" disabled={items.length >= 32} onClick={() => onChange([...items, { filamentId: crypto.randomUUID(), type: materials[0]?.type ?? "PLA", color: materials[0]?.color ?? "#ffffff", weight: "", supportWeight: "", towerWeight: "", otherWeight: "" }])} className="w-full rounded-xl border border-dashed border-slate-300 px-3 py-3 text-sm font-medium text-slate-600 transition hover:border-orange-400 hover:bg-orange-50 hover:text-orange-700 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-orange-950/20 dark:hover:text-orange-300 disabled:opacity-40">
+      <button type="button" disabled={items.length >= 32} onClick={addFilament} className="w-full rounded-xl border border-dashed border-slate-300 px-3 py-3 text-sm font-medium text-slate-600 transition hover:border-orange-400 hover:bg-orange-50 hover:text-orange-700 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-orange-950/20 dark:hover:text-orange-300 disabled:opacity-40">
         {t("manual.addFilament")}
       </button>
     </div>

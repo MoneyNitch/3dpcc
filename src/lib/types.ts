@@ -375,6 +375,9 @@ export interface PrintCostInputs {
   vatPercent: number;
   quantityDiscountThreshold: number;
   quantityDiscountPercent: number;
+  targetPricePerUnit: number | null;
+  /** Legacy saved input; accepted for compatibility but no longer used. */
+  roundPriceTo99?: boolean;
   /** Override price per kg per filamentId, falls back to matched material or a default */
   materialPriceOverrides: Record<string, number>;
   /** Read-only external spool snapshots; existing calculations do not require a live connection. */

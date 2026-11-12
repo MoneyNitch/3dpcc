@@ -135,6 +135,8 @@ export const costInputsSchema = z.strictObject({
   laborMinutes: amount, packagingCost: amount, marginPercent: amount, vatPercent: percent,
   quantityDiscountThreshold: z.number().int().positive().max(1_000_000),
   quantityDiscountPercent: percent,
+  targetPricePerUnit: amount.nullable().default(null),
+  roundPriceTo99: z.boolean().optional(),
   materialPriceOverrides: z.record(idSchema, amount),
   externalSpools: z.record(idSchema, externalSpoolSchema),
   quantity: z.number().int().positive().max(1_000_000),

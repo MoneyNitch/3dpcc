@@ -48,6 +48,7 @@ export function defaultCostInputs(settings: AppSettings): PrintCostInputs {
     vatPercent: settings.costs.vatPercent,
     quantityDiscountThreshold: 5,
     quantityDiscountPercent: 5,
+    targetPricePerUnit: null,
     materialPriceOverrides: {},
     externalSpools: {},
     quantity: 1,
@@ -188,12 +189,17 @@ function finalizeCost(
   const scaledLaborCost = laborCost * (inputs.quantity || 1);
   const scaledPackagingCost = packagingCost * (inputs.quantity || 1);
   const marginAmount = subtotal * (inputs.marginPercent / 100);
-  const priceBeforeVat = subtotal + marginAmount;
   const discountThreshold = inputs.quantityDiscountThreshold ?? 5;
   const configuredDiscountPercent = inputs.quantityDiscountPercent ?? 5;
   const quantityDiscountPercent = inputs.quantity >= discountThreshold
     ? Math.max(0, Math.min(100, configuredDiscountPercent))
     : 0;
+  const quantity = inputs.quantity || 1;
+  const targetPriceFactor = 1 + inputs.vatPercent / 100;
+  const calculatedMarginAmount = inputs.targetPricePerUnit != null && targetPriceFactor > 0
+    ? (inputs.targetPricePerUnit * quantity) / targetPriceFactor - subtotal
+    : marginAmount;
+  const priceBeforeVat = subtotal + calculatedMarginAmount;
   const quantityDiscountAmount = priceBeforeVat * (quantityDiscountPercent / 100);
   const vatAmount = (priceBeforeVat - quantityDiscountAmount) * (inputs.vatPercent / 100);
   const totalPrice = priceBeforeVat - quantityDiscountAmount + vatAmount;
@@ -207,7 +213,7 @@ function finalizeCost(
     laborCost: scaledLaborCost,
     packagingCost: scaledPackagingCost,
     subtotal,
-    marginAmount,
+    marginAmount: calculatedMarginAmount,
     priceBeforeVat,
     quantityDiscountAmount,
     quantityDiscountPercent,

@@ -7,8 +7,10 @@ import { updateSettings } from "@/lib/db";
 import { assignAccessoryNumbers } from "@/lib/db/shared";
 
 const input = accessorySchema.omit({ id: true, stockQuantity: true, numericId: true });
+const createInput = input.extend({ stockQuantity: accessorySchema.shape.stockQuantity });
 const schema = z.discriminatedUnion("action", [
-  z.strictObject({ action: z.literal("create"), item: input }),
+  z.strictObject({ action: z.literal("create"), item: createInput }),
+  z.strictObject({ action: z.literal("createMany"), items: z.array(createInput).min(1).max(1000) }),
   z.strictObject({ action: z.literal("update"), id: z.string().min(1).max(100), item: input, expected: input }),
   z.strictObject({ action: z.literal("delete"), id: z.string().min(1).max(100), expected: input }),
 ]);
@@ -23,9 +25,16 @@ export async function POST(request: Request) {
     if (!parsed.success) throw new ApiError(400, "input", "accessories.error.input");
     const data = parsed.data;
     const settings = await updateSettings((current) => {
-      if (data.action === "create") {
-        if (current.accessoryMaterials.length >= 1000) throw new ApiError(400, "limit", "accessories.error.limit");
-        return assignAccessoryNumbers({ ...current, accessoryMaterials: [...current.accessoryMaterials, { ...data.item, id: randomUUID(), stockQuantity: 0 }] });
+      if (data.action === "create" || data.action === "createMany") {
+        const newItems = data.action === "create" ? [data.item] : data.items;
+        if (current.accessoryMaterials.length + newItems.length > 1000) throw new ApiError(400, "limit", "accessories.error.limit");
+        return assignAccessoryNumbers({
+          ...current,
+          accessoryMaterials: [
+            ...current.accessoryMaterials,
+            ...newItems.map((item) => ({ ...item, id: randomUUID() })),
+          ],
+        });
       }
       const item = current.accessoryMaterials.find((item) => item.id === data.id);
       if (!item) throw new ApiError(404, "not_found", "accessories.error.notFound");

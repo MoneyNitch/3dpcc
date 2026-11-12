@@ -15,6 +15,19 @@ type Point3D = [number, number, number];
 interface Face {
   points: Point3D[];
   color: string;
+  stroke: string;
+}
+
+function contrastingStroke(color: string): string {
+  let hex = color.startsWith("#") ? color.slice(1) : "94a3b8";
+  if (hex.length === 8) hex = hex.slice(2);
+  if (hex.length === 3) hex = hex.split("").map((part) => part + part).join("");
+  if (!/^[\da-f]{6}$/i.test(hex)) hex = "94a3b8";
+  const [red, green, blue] = [0, 2, 4].map((offset) =>
+    parseInt(hex.slice(offset, offset + 2), 16)
+  );
+  const luminance = (red * 0.2126 + green * 0.7152 + blue * 0.0722) / 255;
+  return luminance > 0.5 ? "rgba(15, 23, 42, 0.72)" : "rgba(255, 255, 255, 0.82)";
 }
 
 function colorWithLight(color: string, brightness: number): string {
@@ -45,6 +58,7 @@ export function ModelPreview({
   const thumbnail = plate.thumbnailBase64;
   const plateIndex = plate.plateIndex;
   const [requestedMode, setMode] = useState<PreviewMode>(initialThumbnail ? "2d" : "3d");
+  const [expanded, setExpanded] = useState(false);
   const mode = allow3d
     ? requestedMode === "2d" && !thumbnail ? "3d" : requestedMode
     : "2d";
@@ -67,6 +81,8 @@ export function ModelPreview({
     : null;
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   const [retryVersion, setRetryVersion] = useState(0);
+  const sectionRef = useRef<HTMLElement>(null);
+  const expandButtonRef = useRef<HTMLButtonElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawRef = useRef<() => void>(() => {});
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -79,6 +95,45 @@ export function ModelPreview({
   const visibleLayerHeight = layerHeights[visibleLayerIndex];
   const layerHeightRef = useRef<number | undefined>(visibleLayerHeight);
   layerHeightRef.current = visibleLayerHeight;
+
+  useEffect(() => {
+    if (!expanded) return;
+    const previousOverflow = document.body.style.overflow;
+    const expandButton = expandButtonRef.current;
+    document.body.style.overflow = "hidden";
+    expandButton?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setExpanded(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = sectionRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable?.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      expandButton?.focus();
+    };
+  }, [expanded]);
 
   useEffect(() => {
     if (mode !== "3d" || geometry) return;
@@ -220,7 +275,8 @@ export function ModelPreview({
         (positions[index + offset + 1] - center[1]) / largestSpan,
         (positions[index + offset + 2] - center[2]) / largestSpan,
       ] as Point3D) as Face["points"];
-      faces.push({ points, color: geometry.colors[faceIndex] ?? "#94a3b8" });
+      const color = geometry.colors[faceIndex] ?? "#94a3b8";
+      faces.push({ points, color, stroke: contrastingStroke(color) });
     }
 
     const paint = () => {
@@ -260,13 +316,13 @@ export function ModelPreview({
         return {
           points: rotated.map(([x, y, z]) => [width / 2 + x * scale, height / 2 - y * scale, z] as [number, number, number]),
           depth: rotated.reduce((total, point) => total + point[2], 0) / rotated.length,
-          fill: colorWithLight(face.color, 0.42 + light * 0.58),
+          fill: colorWithLight(face.color, 0.55 + light * 0.45),
+          stroke: face.stroke,
         };
       });
 
       projected.sort((left, right) => left.depth - right.depth);
-      context.lineWidth = 0.45;
-      context.strokeStyle = "rgba(15, 23, 42, 0.2)";
+      context.lineWidth = 0.8;
       for (const face of projected) {
         context.beginPath();
         context.moveTo(face.points[0][0], face.points[0][1]);
@@ -275,6 +331,7 @@ export function ModelPreview({
         context.closePath();
         context.fillStyle = face.fill;
         context.fill();
+        context.strokeStyle = face.stroke;
         context.stroke();
       }
     };
@@ -323,7 +380,15 @@ export function ModelPreview({
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+    <section
+      ref={sectionRef}
+      role={expanded ? "dialog" : undefined}
+      aria-modal={expanded || undefined}
+      aria-label={expanded ? t("print.modelCanvas") : undefined}
+      className={expanded
+        ? "fixed inset-0 z-50 flex h-dvh flex-col overflow-hidden bg-white dark:bg-slate-800"
+        : "overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"}
+    >
       {allow3d && (
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 dark:border-slate-700">
           <div className="inline-flex rounded-md bg-slate-100 p-0.5 dark:bg-slate-900" role="group" aria-label={t("print.modelCanvas")}>
@@ -348,11 +413,22 @@ export function ModelPreview({
               </button>
             )}
           </div>
-          {mode === "3d" && status === "ready" && (
-            <button type="button" onClick={resetView} className="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100">
-              {t("print.resetView")}
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {mode === "3d" && status === "ready" && (
+              <button type="button" onClick={resetView} className="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100">
+                {t("print.resetView")}
+              </button>
+            )}
+            {expanded && !(mode === "3d" && status === "ready") && (
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                className="text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
+              >
+                {t("print.collapse3d")}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -395,18 +471,37 @@ export function ModelPreview({
           {t("print.thumbnailUnavailable")}
         </div>
       ) : mode === "3d" && status === "ready" ? (
-        <canvas
-          ref={canvasRef}
-          aria-label={t("print.modelCanvas")}
-          onPointerDown={(event) => {
-            dragRef.current = { x: event.clientX, y: event.clientY };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={handlePointerMove}
-          onPointerUp={() => { dragRef.current = null; }}
-          onPointerCancel={() => { dragRef.current = null; }}
-          className="block h-[360px] w-full touch-none cursor-grab bg-slate-50 active:cursor-grabbing dark:bg-slate-900"
-        />
+        <div className={`relative ${expanded ? "flex min-h-0 flex-1" : ""}`}>
+          <canvas
+            ref={canvasRef}
+            aria-label={t("print.modelCanvas")}
+            onPointerDown={(event) => {
+              dragRef.current = { x: event.clientX, y: event.clientY };
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={handlePointerMove}
+            onPointerUp={() => { dragRef.current = null; }}
+            onPointerCancel={() => { dragRef.current = null; }}
+            className={`block w-full touch-none cursor-grab active:cursor-grabbing ${
+              expanded ? "min-h-0 flex-1" : "h-[360px]"
+            } bg-slate-200 dark:bg-slate-700`}
+          />
+          <button
+            ref={expandButtonRef}
+            type="button"
+            aria-expanded={expanded}
+            aria-label={t(expanded ? "print.collapse3d" : "print.expand3d")}
+            title={t(expanded ? "print.collapse3d" : "print.expand3d")}
+            onClick={() => setExpanded((current) => !current)}
+            className="absolute bottom-3 right-3 z-10 rounded-md border border-slate-400/70 bg-white/90 p-2 text-slate-700 shadow-md hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 dark:border-slate-500 dark:bg-slate-800/90 dark:text-slate-100 dark:hover:bg-slate-700"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {expanded
+                ? <path d="M8 3v5H3m13-5v5h5M3 16h5v5m8 0v-5h5" />
+                : <path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3" />}
+            </svg>
+          </button>
+        </div>
       ) : mode === "3d" ? (
         <div className="flex min-h-72 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-slate-500 dark:text-slate-400" role="status">
           {status === "idle"

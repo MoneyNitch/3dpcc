@@ -114,3 +114,48 @@ test("quantity discount applies at the configured threshold before VAT", () => {
   assert.ok(fiveCopies.totalPrice < fiveCopiesWithoutDiscount.totalPrice);
   assert.equal(fiveCopies.materialTotal, 10);
 });
+
+test("target unit price derives the margin and scales with quantity", () => {
+  const settings = structuredClone(defaultSettings);
+  settings.costs.electricityPricePerKwh = 0;
+  settings.costs.wearAndTearPerHour = 0;
+  settings.costs.laborRatePerHour = 0;
+  settings.printers[0].powerConsumptionW = 0;
+  settings.printers[0].purchasePrice = 0;
+  settings.printers[0].maintenanceCostPerHour = 0;
+
+  const inputs = defaultCostInputs(settings);
+  inputs.materialPriceOverrides["1"] = 35.7;
+  inputs.packagingCost = 0;
+  inputs.marginPercent = 0;
+  inputs.vatPercent = 0;
+
+  inputs.targetPricePerUnit = 3.99;
+  const single = calculateCost(plate, settings, inputs);
+  assert.ok(Math.abs(single.totalPrice - 3.99) < 1e-10);
+  assert.ok(Math.abs(single.marginAmount - 0.42) < 1e-10);
+
+  inputs.quantity = 2;
+  const multiple = calculateCost(plate, settings, inputs);
+  assert.ok(Math.abs(multiple.totalPrice - 7.98) < 1e-10);
+  assert.ok(Math.abs(multiple.marginAmount - 0.84) < 1e-10);
+
+  inputs.quantity = 1;
+  inputs.targetPricePerUnit = 3.99;
+  inputs.vatPercent = 19;
+  inputs.materialPriceOverrides["1"] = 30;
+  const targetWithTax = calculateCost(plate, settings, inputs);
+  assert.ok(Math.abs(targetWithTax.totalPrice - 3.99) < 1e-10);
+  assert.ok(Math.abs(
+    targetWithTax.totalPrice - targetWithTax.priceBeforeVat + targetWithTax.quantityDiscountAmount -
+    targetWithTax.vatAmount
+  ) < 1e-10);
+
+  inputs.quantity = 5;
+  inputs.quantityDiscountThreshold = 5;
+  inputs.quantityDiscountPercent = 5;
+  const discountedTarget = calculateCost(plate, settings, inputs);
+  assert.ok(Math.abs(discountedTarget.priceBeforeVat * 1.19 - 3.99 * 5) < 1e-10);
+  assert.ok(Math.abs(discountedTarget.totalPrice - 3.99 * 5 * 0.95) < 1e-10);
+  assert.equal(discountedTarget.quantityDiscountPercent, 5);
+});

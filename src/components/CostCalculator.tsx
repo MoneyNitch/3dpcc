@@ -1,7 +1,7 @@
 "use client";
 import { usePermission } from "@/lib/auth/context";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AppSettings } from "@/lib/types";
 import { calculateAllPlatesCost, calculateCost, findFilamentPrice, findPrinter } from "@/lib/costCalculator";
@@ -23,6 +23,7 @@ export function CostCalculator({
   const { inputs, update, save, saved, saveError, inventoryBusy, setInventoryBusy, inventoryRevision } = useCostInputs();
   const canSave = usePermission("prints.write");
   const { t, money, currency, lang } = useLocale();
+  const targetPriceHelpId = useId();
   const [spoolResults, setSpoolResults] = useState<ExternalSpoolResult[] | null>(null);
   const [loadingSpools, setLoadingSpools] = useState(false);
   const [spoolError, setSpoolError] = useState(false);
@@ -202,6 +203,9 @@ export function CostCalculator({
     : plate.totalPrintTimeSeconds;
   const estimatedKwh = (printer.powerConsumptionW / 1000) * (totalPrintTimeSeconds / 3600);
   const usesManualEnergy = inputs.energyKwhOverride !== null;
+  const targetPriceCannotBeReached = inputs.targetPricePerUnit !== null &&
+    inputs.targetPricePerUnit > 0 &&
+    (1 + inputs.vatPercent / 100) <= 0;
 
   return (
     <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -448,11 +452,56 @@ export function CostCalculator({
           <input
             type="text"
             inputMode="decimal"
-            defaultValue={formatDecimal(inputs.marginPercent)}
+            value={inputs.targetPricePerUnit === null
+              ? formatDecimal(inputs.marginPercent)
+              : result.subtotal > 0
+                ? formatDecimal((result.marginAmount / result.subtotal) * 100)
+                : t("cost.marginNotAvailable")}
+            readOnly={inputs.targetPricePerUnit !== null}
             onChange={(e) => update("marginPercent", parseDecimal(e.target.value))}
             className={inputClass}
           />
         </label>
+        <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
+          <span className="inline-flex items-center gap-1">
+            {t("cost.targetPricePerUnit")} ({unit})
+            <span
+              role="img"
+              tabIndex={0}
+              aria-label={t("cost.targetPriceInfo")}
+              aria-describedby={targetPriceHelpId}
+              className="group relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-slate-400 outline-offset-2 hover:text-orange-600 focus-visible:outline-2 focus-visible:outline-orange-500 dark:text-slate-500 dark:hover:text-orange-400"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className="h-4 w-4" stroke="currentColor">
+                <circle cx="8" cy="8" r="6.25" strokeWidth="1.5" />
+                <path d="M8 7.25v4M8 4.75h.01" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <span
+                id={targetPriceHelpId}
+                role="tooltip"
+                className="invisible pointer-events-none absolute bottom-full right-0 z-20 mb-2 w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-3 text-xs font-normal text-slate-600 opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
+              >
+                {t("cost.targetPriceHelp")}
+              </span>
+            </span>
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            defaultValue={inputs.targetPricePerUnit === null ? "" : formatDecimal(inputs.targetPricePerUnit)}
+            onChange={(e) => {
+              const value = e.target.value.trim();
+              const targetPrice = value ? parseLocalizedNumber(value, lang) : null;
+              update("targetPricePerUnit", targetPrice !== null && Number.isFinite(targetPrice) ? targetPrice : null);
+            }}
+            className={inputClass}
+          />
+        </label>
+        {targetPriceCannotBeReached && (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {t("cost.targetPriceUnavailable")}
+            </p>
+        )}
         <label className="text-sm font-medium text-slate-600 dark:text-slate-300">
           {t("cost.tax")} (%)
           <input

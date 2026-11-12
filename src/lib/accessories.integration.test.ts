@@ -65,7 +65,20 @@ test("accessory catalog, stock, label persistence and stale Settings saves stay 
     assert.ok(replacements.every((response) => response.status === 200));
     db.resetStoreCache();
     assert.deepEqual((await db.getSettings()).accessoryMaterials.map((entry) => entry.numericId), [2, 3]);
-    console.log("Accessory label persistence verified");
+    const batch = await catalog.POST(request("POST", {
+      action: "createMany",
+      items: [
+        { name: "Batch bolts", pricePerPack: 4, unitsPerPack: 10, stockQuantity: 25 },
+        { name: "Batch washers", pricePerPack: 2, unitsPerPack: 50, stockQuantity: 0 },
+      ],
+    }));
+    assert.equal(batch.status, 200);
+    const batchItems = (await batch.json()).accessories.slice(-2);
+    assert.deepEqual(batchItems.map((entry) => [entry.name, entry.stockQuantity, entry.numericId]), [
+      ["Batch bolts", 25, 4],
+      ["Batch washers", 0, 5],
+    ]);
+    console.log("Accessory catalog, batch creation and label persistence verified");
   `;
   try {
     const result = spawnSync(process.execPath, [
@@ -76,7 +89,7 @@ test("accessory catalog, stock, label persistence and stale Settings saves stay 
       encoding: "utf8", timeout: 60_000,
     });
     assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stdout}\n${result.stderr}`);
-    assert.ok(result.stdout.includes("Accessory label persistence verified"));
+    assert.ok(result.stdout.includes("Accessory catalog, batch creation and label persistence verified"));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

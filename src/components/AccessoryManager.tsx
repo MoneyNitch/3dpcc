@@ -102,7 +102,7 @@ export function AccessoryManager({ items, onItemsChanged, initialMovements, canE
     actionMenuTriggerRef.current = trigger;
     const bounds = trigger.getBoundingClientRect();
     const menuWidth = Math.min(224, window.innerWidth - 16);
-    const menuHeight = canEdit ? 176 : 124;
+    const menuHeight = canEdit && includeEditable ? 248 : 140;
     const top = bounds.bottom + menuHeight + 8 <= window.innerHeight - 8
       ? bounds.bottom + 8
       : Math.max(8, bounds.top - menuHeight - 8);
@@ -144,6 +144,20 @@ export function AccessoryManager({ items, onItemsChanged, initialMovements, canE
       window.removeEventListener("resize", closeMenu);
     };
   }, [actionMenuItemId]);
+
+  useEffect(() => {
+    const trigger = actionMenuTriggerRef.current;
+    const menu = actionMenuRef.current;
+    if (!actionMenuItemId || !trigger || !menu) return;
+
+    const triggerBounds = trigger.getBoundingClientRect();
+    const menuBounds = menu.getBoundingClientRect();
+    const top = triggerBounds.bottom + menuBounds.height + 8 <= window.innerHeight - 8
+      ? triggerBounds.bottom + 8
+      : Math.max(8, triggerBounds.top - menuBounds.height - 8);
+    const left = Math.max(8, Math.min(triggerBounds.right - menuBounds.width, window.innerWidth - menuBounds.width - 8));
+    setActionMenuPosition((current) => current?.top === top && current.left === left ? current : { top, left });
+  }, [actionMenuItemId, actionMenuIncludesEditable]);
 
   useEffect(() => {
     if (!modalOpen || !dialog.current) return;
@@ -245,7 +259,7 @@ export function AccessoryManager({ items, onItemsChanged, initialMovements, canE
   function renderActionMenu(item: AccessoryMaterial) {
     return <div ref={actionMenuRef} role="group" aria-label={t("accessories.actions")}
       style={{ position: "fixed", top: actionMenuPosition?.top ?? 8, left: actionMenuPosition?.left ?? 8 }}
-      className="z-[100] w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10">
+      className="z-[100] max-h-[calc(100vh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10">
       {actionMenuIncludesEditable && canEdit && <>
         <button type="button" className={menuButtonClass} onClick={() => {
           setEditing(item);
@@ -434,8 +448,7 @@ export function AccessoryManager({ items, onItemsChanged, initialMovements, canE
               <td className="break-all px-1 py-2 text-right tabular-nums sm:px-2 md:px-3 2xl:px-4">{item.unitsPerPack}</td>
               <td className="break-all px-1 py-2 text-right font-semibold tabular-nums sm:px-2 md:px-3 2xl:px-4">{money(item.pricePerPack / item.unitsPerPack)}</td>
               <td className="px-1 py-2 align-middle sm:px-2 md:px-3 2xl:px-4">
-                <div className="hidden 2xl:block">{renderItemActions(item, true)}</div>
-                <div className="2xl:hidden">{renderItemActions(item, true, true)}</div>
+                {renderItemActions(item, true, true)}
               </td>
             </tr>
           </tbody>)}
